@@ -20,47 +20,20 @@ const int kNblks = 1656;
 const int kNrows = 69;
 const int kNcols = 27; // varies by row. 27 is the maxc.
 
-// Temporary
-Int_t Nmin = 20;
-Double_t Corr_Factor_Enrg_Calib_w_Cosmic = 1.;
-Double_t minMBratio = 0.1;
-double enable_4vec = false;
-int recon_type = 0;  
-Double_t th_bb = 29.46*TMath::DegToRad();
-Double_t ECAL_dist = 8.0; //m
-Double_t ECAL_zoff = 0., ECAL_voff = 0., ECAL_hoff = -0.071; //m
-
+// Utility functions
+string GetDate();
 void CustmProfHisto(TH1*);
-
-void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e) {
-#pragma omp parallel for schedule(static)
-  for (Int_t icol = 0; icol < kNblks; icol++) {
-    Double_t a_col = A[icol];  // Cache A[icol]
-    B(icol) += a_col;          // Update B using TVectorD
-    for (Int_t irow = 0; irow < kNblks; irow++) {
-      M(icol, irow) += a_col * A[irow] / p_e;
-    }
-  }
-}
-
-std::unordered_set<int> ReadNumFromTextFile(const std::string &filename) {
-  std::unordered_set<int> numSet;
-  std::ifstream file(filename);
-  int num;
-  // Check if the file was successfully opened
-  if (!file) {
-    throw std::runtime_error("Error: Unable to open file " + filename);
-  }
-  while (file >> num) {
-    numSet.insert(num);
-  }
-  return numSet;
-}
-
-// 8*************
-// ************8888888
-// *************
-void elas_calib()
+TString GetOutFileBase(TString);
+void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e);
+std::vector<int> ReadNumFromTextFileToV(const std::string &filename);
+std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename);
+std::vector<std::string> SplitString(char const delim, std::string const myStr);
+std::vector<std::pair<double, double>> ReadXYPosBADChan(const std::string& filename);
+bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, double xSEED, double ySEED, double r2_max, int debug);
+  
+// Main function
+void elas_calib(char const *configfilename,
+		bool isdebug=0) //0=False, 1=True
 {
   gErrorIgnoreLevel = kError; // Ignores all ROOT warnings
 
@@ -71,51 +44,191 @@ void elas_calib()
 
   TChain *C = new TChain("T");
   //creating base for outfile names
-  TString cfgfilebase = "elas_calib"; //= GetOutFileBase(configfilename);
+  TString cfgfilebase = GetOutFileBase(configfilename);
 
-  // C->Add("/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_*.root");
-  C->Add("/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_1.root");
-  // C->Add("/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_2.root");  
-
-  Double_t E_beam=6.476;
-  Double_t p_p, p_px, p_py, p_pz, th_p, ph_p, E_p; 
+  // Defining important variables
+  // misc
+  TString macros_dir;
+  Int_t Nmin=10;
+  Double_t minMBratio=0.1;  
+  // ECAL related
+  Double_t ECAL_dist=8.0; //m
+  Double_t ECAL_voff=0., ECAL_hoff=0., ECAL_zoff=0.; //m
+  // histogram related
+  Double_t h_W2_bin=200, h_W2_min=0., h_W2_max=5.;
+  Double_t h_Q2_bin=200, h_Q2_min=0., h_Q2_max=5.;  
+  Double_t h_eECAL_bin=200, h_eECAL_min=0., h_eECAL_max=5.;
+  Double_t h_EovP_bin=200, h_EovP_min=0., h_EovP_max=5., EovP_fit_width=1.5;
+  Double_t h2_EovP_bin=200, h2_EovP_min=0., h2_EovP_max=5.;
+  Double_t h2_p_bin = 200, h2_p_min = 0., h2_p_max = 5.;  
+  Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
+  // analysis related
+  bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0;
+  Double_t W2_mean, W2_sigma, W2_nsigma;
+  Double_t EovP_cut_limit, eECAL_cut_limit;
+  Double_t hit_threshold=0., engFrac_cut=0., tmax_cut=1000.;    
+  // kinematic related
+  Double_t E_beam, th_bb;
+  Double_t p_p, p_px, p_py, p_pz, th_p, ph_p, E_p, p_p_offset; 
   Double_t th_e, ph_e;
   Double_t nu, Q2, W2, dx, dy;
-  Double_t nu_4vec, Q2_4vec, W2_4vec, dx_4vec, dy_4vec;
-
-  Double_t h_eECAL_bin = 200, h_eECAL_min = 0., h_eECAL_max = 5.;
-  Double_t h_EovP_bin = 200, h_EovP_min = 0., h_EovP_max = 5., EovP_fit_width = 1.5;
-  Double_t h2_EovP_bin = 200, h2_EovP_min = 0., h2_EovP_max = 5.;
-  Double_t h2_p_coarse_bin = 25, h2_p_coarse_min = 0., h2_p_coarse_max = 5.;  
-
-  // Defining variables for scattered e- momentum
+  Double_t nu_4vec, Q2_4vec, W2_4vec, dx_4vec, dy_4vec;  
+  // -- Defining variables for scattered e- momentum
   Double_t p_e;      // calculated using recontructed momnetum
   Double_t p_e_th;   // calculated using recontructed angles
   Double_t p_e_CURR; // this variable will be used for calibration
-
+  // analysis related
+  int recon_type=1;  // 1=> use p_e. Otherwise, p_e_th is used  
+  // bool enable_4vec=false;
+  
   TMatrixD M(kNblks,kNblks), M_inv(kNblks,kNblks);
   TVectorD B(kNblks), CoeffR(kNblks);  
   Double_t A[kNblks];
 
   // Reading module IDs of ECAL blocks at the edge
-  std::unordered_set<int> edgeECALblks = ReadNumFromTextFile("edge_blocks_ecal.txt");
+  std::unordered_set<int> edgeECALblks = ReadNumFromTextFileToUOS("maps/edge_blocks_ecal.txt");
   bool isECALedge = false;
+
+  // Reading bad ECAL module channels
+  std::vector<std::pair<double, double>> xyBADchan = ReadXYPosBADChan("maps/bad_ecal_channels_04_05_25.csv");
+  bool cut_on_nearBADchan, isNearBadChan = false;
+  Double_t r_max, r2_max;
   
-  TCut globalcut = "sbs.tr.p[0]<6&&sbs.tr.vz[0]<0.1&&sbs.tr.vz[0]>-0.25&&sbs.gemFT.track.chi2ndf<10&&sbs.hcal.e>0.05";
-  TString gcutstr;
-  // while (currentline.ReadLine(configfile) && !currentline.BeginsWith("endcut")) {
-  //   if (!currentline.BeginsWith("#")) {
-  //     globalcut += currentline;
-  //     gcutstr += currentline;
-  //   }    
-  // }
-  // std::vector<std::string> gCutList = SplitString('&', gcutstr.Data());
-  TTreeFormula *GlobalCut = new TTreeFormula("GlobalCut", globalcut, C);  
+  // Reading config file
+  ifstream configfile(configfilename);
+  char runlistfile[1000]; 
+  TString currentline, readline;
+  while( currentline.ReadLine( configfile ) && !currentline.BeginsWith("endRunlist") ){
+    if( !currentline.BeginsWith("#") ){
+      sprintf(runlistfile,"%s",currentline.Data());
+      ifstream run_list(runlistfile);
+      while( readline.ReadLine( run_list ) && !readline.BeginsWith("endlist") ){
+  	if( !readline.BeginsWith("#") ){
+	  std::cout << readline << "\n";
+	  C->Add(readline);
+  	}
+      }   
+    } 
+  }  
+  TCut globalcut = ""; TString gcutstr;
+  while (currentline.ReadLine(configfile) && !currentline.BeginsWith("endcut")) {
+    if (!currentline.BeginsWith("#")) {
+      globalcut += currentline;
+      gcutstr += currentline;
+    }    
+  }
+  std::vector<std::string> gCutList = SplitString('&', gcutstr.Data());
+  TTreeFormula *GlobalCut = new TTreeFormula("GlobalCut", globalcut, C);
+  while (currentline.ReadLine(configfile)) {
+    if (currentline.BeginsWith("#")) continue;
+    TObjArray *tokens = currentline.Tokenize(" ");
+    Int_t ntokens = tokens->GetEntries();
+    if( ntokens>1 ){
+      TString skey = ((TObjString*)(*tokens)[0])->GetString();
+      if( skey == "macros_dir" ){
+	macros_dir = ((TObjString*)(*tokens)[1])->GetString();
+      }
+      if( skey == "E_beam" ){
+	E_beam = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "BB_theta" ){
+	th_bb = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	th_bb *= TMath::DegToRad(); 
+      }
+      if( skey == "ECAL_dist" ){
+	ECAL_dist = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "ECAL_posOFF" ){
+	ECAL_voff = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	ECAL_hoff = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	ECAL_zoff = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "nearBADchan_cut" ){
+	cut_on_nearBADchan = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	r_max = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	r2_max = pow(r_max,2);
+      }            
+      if( skey == "hit_threshold" ){
+      	hit_threshold = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "tmax_cut" ){
+      	tmax_cut = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "engFrac_cut" ){
+      	engFrac_cut = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "Min_Event_Per_Channel" ){
+	Nmin = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "Min_MB_Ratio" ){
+	minMBratio = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+      }
+      if( skey == "eECAL_cut" ){
+	cut_on_eECAL = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	eECAL_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
+      }      
+      if( skey == "EovP_cut" ){
+	cut_on_EovP = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	EovP_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
+      }
+      if( skey == "W2_cut" ){
+	cut_on_W2 = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	W2_mean = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	W2_sigma = ((TObjString*)(*tokens)[3])->GetString().Atof();
+	W2_nsigma = ((TObjString*)(*tokens)[4])->GetString().Atof();
+      }
+      if( skey == "h_W2" ){
+	h_W2_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_W2_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_W2_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "h_Q2" ){
+	h_Q2_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_Q2_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_Q2_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "h_EovP" ){
+	h_EovP_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_EovP_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_EovP_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "EovP_fit_width" ){
+	EovP_fit_width = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "h_eECAL" ){
+	h_eECAL_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_eECAL_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_eECAL_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "h2_p" ){
+	h2_p_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h2_p_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h2_p_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "h2_p_coarse" ){
+	h2_p_coarse_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h2_p_coarse_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h2_p_coarse_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "h2_EovP" ){
+	h2_EovP_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h2_EovP_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h2_EovP_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "p_p_Offset" ){
+	p_p_offset = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      }
+      if( skey == "*****" ){
+	break;
+      }
+    } 
+    delete tokens;
+  }  
 
   // Turning on relevant tree branches
   int maxNtr = 200; //max # of tracks expected per event
   C->SetBranchStatus("*", 0);
-  // bb.ps branches
+  // earm.ecal branches
   C->SetBranchStatus("earm.ecal.*", 1);
   Double_t nclusECAL;              C->SetBranchAddress("earm.ecal.nclus", &nclusECAL);
   Double_t idblkECAL;              C->SetBranchAddress("earm.ecal.idblk", &idblkECAL);
@@ -185,16 +298,14 @@ void elas_calib()
   TH2D *h2_EovP_vs_blk_raw_calib = new TH2D("h2_EovP_vs_blk_raw_calib","Raw E/p per block (Calibrated)",kNcols,0,kNcols,kNrows,0,kNrows);
   TH2D *h2_count = new TH2D("h2_count","Count for E/p per block",kNcols,0,kNcols,kNrows,0,kNrows);
   TH2D *h2_count_calib = new TH2D("h2_count_calib","Count for E/p per block",kNcols,0,kNcols,kNrows,0,kNrows);
-  // TH2D *h2_EovP_vs_blk_trPOS_raw = new TH2D("h2_EovP_vs_blk_trPOS_raw","Raw E/p per block(TrPos)",kNcols,-0.2992,0.2992,kNrows,-1.1542,1.1542);
-  // TH2D *h2_count_trP = new TH2D("h2_count_trP","Count for E/p per block(TrPos)",kNcols,-0.2992,0.2992,kNrows,-1.1542,1.1542);
   
   // Creating output ROOT file to contain histograms
-  TString outFile, outPlot;
-  outFile = "test_elas_calib.root";
-  // char const * debug = isdebug ? "_test" : "";
-  // char const * elcut = elastic_cut ? "_elcut" : "";
-  // outFile = Form("%s/hist/%s_prepass%d_bbcal_eng_calib%s%s.root",macros_dir.Data(),cfgfilebase.Data(),ppass,elcut,debug);
-  // outPlot = Form("%s/plots/%s_prepass%d_bbcal_eng_calib%s%s.pdf",macros_dir.Data(),cfgfilebase.Data(),ppass,elcut,debug);
+  TString outFile, outPlot, outGain, outGainR;
+  char const * debug = isdebug ? "_test" : "";
+  outFile = Form("%s/hist/%s%s.root",macros_dir.Data(),cfgfilebase.Data(),debug);
+  outPlot = Form("%s/plots/%s%s.pdf",macros_dir.Data(),cfgfilebase.Data(),debug);
+  outGain = Form("%s/gain/%s_gainCoeff%s.txt",macros_dir.Data(),cfgfilebase.Data(),debug);  
+  outGainR = Form("%s/gain/%s_gainRatio%s.txt",macros_dir.Data(),cfgfilebase.Data(),debug);  
 
   //std::unique_ptr<TFile> fout( TFile::Open(outFile, "RECREATE") );
   TFile *fout = new TFile(outFile, "RECREATE");
@@ -219,22 +330,25 @@ void elas_calib()
   TH2D *h2_EovP_vs_blk = new TH2D("h2_EovP_vs_blk","E/p per block | Before",kNcols,0,kNcols,kNrows,0,kNrows);
   TH2D *h2_EovP_vs_blk_calib = new TH2D("h2_EovP_vs_blk_calib","E/p per block | After",kNcols,0,kNcols,kNrows,0,kNrows);  
 
-  TH2D *h2_EovP_vs_xECALexp = new TH2D("h2_EovP_vs_xECALexp","E/p vs xECAL Expected | Before",200,-1.7,1.7,200,0.4,1.6);
-  TH2D *h2_EovP_vs_xECALexp_calib = new TH2D("h2_EovP_vs_xECALexp_calib","E/p vs xECAL Expected | After",200,-1.7,1.7,200,0.4,1.6);
-  TH2D *h2_EovP_vs_yECALexp = new TH2D("h2_EovP_vs_yECALexp","E/p vs yECAL Expected | Before",200,-0.8,0.8,200,0.4,1.6);
-  TH2D *h2_EovP_vs_yECALexp_calib = new TH2D("h2_EovP_vs_yECALexp_calib","E/p vs yECAL Expected | After",200,-0.8,0.8,200,0.4,1.6);
-  TH2D *h2_eECAL_vs_xECALexp = new TH2D("h2_eECAL_vs_xECALexp","ECAL energy vs xECAL Expected | Before",200,-1.7,1.7,200,0,4);
-  TH2D *h2_eECAL_vs_xECALexp_calib = new TH2D("h2_eECAL_vs_xECALexp_calib","ECAL energy vs xECAL Expected | After",200,-1.7,1.7,200,0,4);
-  TH2D *h2_eECAL_vs_yECALexp = new TH2D("h2_eECAL_vs_yECALexp","ECAL energy vs yECAL Expected | Before",200,-0.8,0.8,200,0,4);
-  TH2D *h2_eECAL_vs_yECALexp_calib = new TH2D("h2_eECAL_vs_yECALexp_calib","ECAL energy vs yECAL Expected | After",200,-0.8,0.8,200,0,4);  
-  
-  TH2D *h2_nev_per_blk = new TH2D("h2_nev_per_blk","# good events per block;ECAL cols;ECAL rows",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_EovP_vs_xECALexp = new TH2D("h2_EovP_vs_xECALexp","E/p vs xECAL Expected | Before",200,-1.7,1.7,h_EovP_bin,h_EovP_min,h_EovP_max);
+  TH2D *h2_EovP_vs_xECALexp_calib = new TH2D("h2_EovP_vs_xECALexp_calib","E/p vs xECAL Expected | After",200,-1.7,1.7,h_EovP_bin,h_EovP_min,h_EovP_max);
+  TH2D *h2_EovP_vs_yECALexp = new TH2D("h2_EovP_vs_yECALexp","E/p vs yECAL Expected | Before",200,-0.8,0.8,h_EovP_bin,h_EovP_min,h_EovP_max);
+  TH2D *h2_EovP_vs_yECALexp_calib = new TH2D("h2_EovP_vs_yECALexp_calib","E/p vs yECAL Expected | After",200,-0.8,0.8,h_EovP_bin,h_EovP_min,h_EovP_max);
+  TH2D *h2_eECAL_vs_xECALexp = new TH2D("h2_eECAL_vs_xECALexp","ECAL energy vs xECAL Expected | Before",200,-1.7,1.7,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
+  TH2D *h2_eECAL_vs_xECALexp_calib = new TH2D("h2_eECAL_vs_xECALexp_calib","ECAL energy vs xECAL Expected | After",200,-1.7,1.7,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
+  TH2D *h2_eECAL_vs_yECALexp = new TH2D("h2_eECAL_vs_yECALexp","ECAL energy vs yECAL Expected | Before",200,-0.8,0.8,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
+  TH2D *h2_eECAL_vs_yECALexp_calib = new TH2D("h2_eECAL_vs_yECALexp_calib","ECAL energy vs yECAL Expected | After",200,-0.8,0.8,h_eECAL_bin,h_eECAL_min,h_eECAL_max);  
+
+  TH2D *h2_nev_per_blk = new TH2D("h2_nev_per_blk","Number of Good Events per Block;ECAL cols;ECAL rows",kNcols,0,kNcols,kNrows,0,kNrows);
+  // TH2D *h2_nev_per_blk_bot = new TH2D("h2_nev_per_blk_bot","# good ev per blk (Bottom Half);ECAL cols;ECAL rows",kNcols,0,kNcols,33,0,33);
+  // TH2D *h2_nev_per_blk_top = new TH2D("h2_nev_per_blk_top","# good ev per blk (Top Half);ECAL cols;ECAL rows",kNcols,0,kNcols,35,34,69);  
   
   // defining output ROOT tree (Set max size to 4GB)
   TTree *Tout = new TTree("Tout", cfgfilebase.Data()); 
   Tout->SetMaxTreeSize(4000000000LL);
   //
   bool T_isECALedge;     Tout->Branch("isECALedge", &T_isECALedge, "isECALedge/O");
+  bool T_isNearBadChan;  Tout->Branch("isNearBadChan", &T_isNearBadChan, "isNearBadChan/O");  
   //
   Double_t T_E_beam;     Tout->Branch("E_beam", &T_E_beam, "E_beam/D");
   Double_t T_p_p;        Tout->Branch("p_p", &T_p_p, "p_p/D");
@@ -255,11 +369,11 @@ void elas_calib()
   Double_t T_xECAL_exp;  Tout->Branch("xECAL_exp", &T_xECAL_exp, "xECAL_exp/D"); 
   Double_t T_yECAL_exp;  Tout->Branch("yECAL_exp", &T_yECAL_exp, "yECAL_exp/D");
   //
-  Double_t T_nu_4vec;    if (enable_4vec) Tout->Branch("nu_4vec", &T_nu_4vec, "nu_4vec/D"); 
-  Double_t T_W2_4vec;    if (enable_4vec) Tout->Branch("W2_4vec", &T_W2_4vec, "W2_4vec/D"); 
-  Double_t T_Q2_4vec;    if (enable_4vec) Tout->Branch("Q2_4vec", &T_Q2_4vec, "Q2_4vec/D");
-  Double_t T_xECAL_exp_4vec; if (enable_4vec) Tout->Branch("xECAL_exp_4vec", &T_xECAL_exp_4vec, "xECAL_exp_4vec/D"); 
-  Double_t T_yECAL_exp_4vec; if (enable_4vec) Tout->Branch("yECAL_exp_4vec", &T_yECAL_exp_4vec, "yECAL_exp_4vec/D");
+  // Double_t T_nu_4vec;    if (enable_4vec) Tout->Branch("nu_4vec", &T_nu_4vec, "nu_4vec/D"); 
+  // Double_t T_W2_4vec;    if (enable_4vec) Tout->Branch("W2_4vec", &T_W2_4vec, "W2_4vec/D"); 
+  // Double_t T_Q2_4vec;    if (enable_4vec) Tout->Branch("Q2_4vec", &T_Q2_4vec, "Q2_4vec/D");
+  // Double_t T_xECAL_exp_4vec; if (enable_4vec) Tout->Branch("xECAL_exp_4vec", &T_xECAL_exp_4vec, "xECAL_exp_4vec/D"); 
+  // Double_t T_yECAL_exp_4vec; if (enable_4vec) Tout->Branch("yECAL_exp_4vec", &T_yECAL_exp_4vec, "yECAL_exp_4vec/D");
   // ECAL related
   Double_t T_eECAL;      Tout->Branch("eECAL", &T_eECAL, "eECAL/D"); 
   Double_t T_xECAL;      Tout->Branch("xECAL", &T_xECAL, "xECAL/D"); 
@@ -319,7 +433,15 @@ void elas_calib()
       // ECAL active area cut
       isECALedge = edgeECALblks.count((int)idblkECAL);
       if (isECALedge) continue;
-      
+
+      // avoid events where seed is near known bad channels
+      if (cut_on_nearBADchan) {
+	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,0);
+	if (isNearBadChan) continue;  // apply the cut
+      }
+
+      // keeping count of events passing globcal cuts
+      Ngoodevs++;
       
       TVector3 vertex(0,0,trVz[0]);
       
@@ -355,37 +477,38 @@ void elas_calib()
       dx = xECAL - T_xECAL_exp;
       dy = yECAL - T_yECAL_exp;    
 
-      if (enable_4vec) {
-	// elastic calculations (Using 4-vector method)
-	// Relevant 4-vectors
-	/* Reaction    : e + p -> e' + p'
-	   Conservation: Pei + Ppi = Pef + Ppf */
-	TLorentzVector Pei(0,0,E_beam,E_beam);  // incoming e- 4-vector
-	TLorentzVector Ppi(0,0,0,Mp);           // target nucleon 4-vector
-	TLorentzVector Ppf(p_px,                // Struck nucleon 4-vector
-			   p_py,
-			   p_pz,
-			   E_p);
-	TLorentzVector Pef = Pei + Ppi - Ppf;   // scattered e- 4-vector
-	//
-	TLorentzVector q = Ppf - Ppi;                // 4-momentum of virtual photon
-	nu_4vec = q.E();
-	Q2_4vec = -q.M2();
-	W2_4vec = Ppf.M2();
-	TVector3 Pefhat_4vec = Pef.Vect().Unit();
-	// calculating expected hit positions on ECAL (4-vect method)
-	Double_t sintersect_4vec = (ECAL_origin - vertex).Dot(ECAL_zaxis) / (Pefhat_4vec.Dot(ECAL_zaxis));
-	TVector3 ECAL_intersect_4vec = vertex + sintersect_4vec*Pefhat_4vec; 
-	T_xECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_xaxis);
-	T_yECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_yaxis);
-	dx_4vec = xECAL - T_xECAL_exp_4vec;
-	dy_4vec = yECAL - T_yECAL_exp_4vec;   
-	T_nu_4vec = nu_4vec;
-	T_Q2_4vec = Q2_4vec;
-	T_W2_4vec = W2_4vec;
-      }
+      // if (enable_4vec) {
+      // 	// elastic calculations (Using 4-vector method)
+      // 	// Relevant 4-vectors
+      // 	/* Reaction    : e + p -> e' + p'
+      // 	   Conservation: Pei + Ppi = Pef + Ppf */
+      // 	TLorentzVector Pei(0,0,E_beam,E_beam);  // incoming e- 4-vector
+      // 	TLorentzVector Ppi(0,0,0,Mp);           // target nucleon 4-vector
+      // 	TLorentzVector Ppf(p_px,                // Struck nucleon 4-vector
+      // 			   p_py,
+      // 			   p_pz,
+      // 			   E_p);
+      // 	TLorentzVector Pef = Pei + Ppi - Ppf;   // scattered e- 4-vector
+      // 	//
+      // 	TLorentzVector q = Ppf - Ppi;                // 4-momentum of virtual photon
+      // 	nu_4vec = q.E();
+      // 	Q2_4vec = -q.M2();
+      // 	W2_4vec = Ppf.M2();
+      // 	TVector3 Pefhat_4vec = Pef.Vect().Unit();
+      // 	// calculating expected hit positions on ECAL (4-vect method)
+      // 	Double_t sintersect_4vec = (ECAL_origin - vertex).Dot(ECAL_zaxis) / (Pefhat_4vec.Dot(ECAL_zaxis));
+      // 	TVector3 ECAL_intersect_4vec = vertex + sintersect_4vec*Pefhat_4vec; 
+      // 	T_xECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_xaxis);
+      // 	T_yECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_yaxis);
+      // 	dx_4vec = xECAL - T_xECAL_exp_4vec;
+      // 	dy_4vec = yECAL - T_yECAL_exp_4vec;   
+      // 	T_nu_4vec = nu_4vec;
+      // 	T_Q2_4vec = Q2_4vec;
+      // 	T_W2_4vec = W2_4vec;
+      // }
       
       T_isECALedge = isECALedge;
+      T_isNearBadChan = isNearBadChan;
       
       T_p_p = p_p;
       T_p_px = p_px;
@@ -414,27 +537,29 @@ void elas_calib()
       T_colblkECAL = colblkECAL;
       T_idblkECAL = idblkECAL;
       T_atimeECAL = atimeECAL;
-    
+      
       // Loop over all the blocks in main cluster and fill in A's
       Double_t eECALcl = 0.;
       for(Int_t blk=0; blk<nblkECAL; blk++){
 	Int_t blkID = int(idclblkECAL[blk]);	
 	// if (eclblkECAL[blk]>sh_hit_threshold) {
-	  // Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
-	  // Double_t shengFrac = eclblkECAL[blk]/eclblkECAL[0];
-	  // if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
-	    Double_t eclblkECAL_i = eclblkECAL[blk] * Corr_Factor_Enrg_Calib_w_Cosmic;
-	    A[blkID] += eclblkECAL_i;
-	    eECALcl += eclblkECAL_i;
-	    //ClusEngECAL += eclblkECAL_i;
-	    // filling cluster level histos
-	    // if (blk!=0) {
-	    //   h_ECALcltdiff->Fill(shtdiff);
-	    //   h2_ECALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
-	    // }
-	  // }
+	// Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
+	// Double_t shengFrac = eclblkECAL[blk]/eclblkECAL[0];
+	// if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
+	Double_t eclblkECAL_i = eclblkECAL[blk];
+	A[blkID] += eclblkECAL_i;
+	eECALcl += eclblkECAL_i;
+	//ClusEngECAL += eclblkECAL_i;
+	// filling cluster level histos
+	// if (blk!=0) {
+	//   h_ECALcltdiff->Fill(shtdiff);
+	//   h2_ECALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
+	// }
+	// }
 	// }
 	h2_nev_per_blk->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
+	// if (blkID<=791) h2_nev_per_blk_bot->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
+	// else h2_nev_per_blk_top->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
 	nevents_per_blk[blkID]++; 
       }      
       Double_t EovP = eECALcl/p_e_CURR;
@@ -475,6 +600,9 @@ void elas_calib()
   std::cout << "\n\n";
   h2_EovP_vs_blk->Divide(h2_EovP_vs_blk_raw, h2_count);
 
+  // Let's customize the histogram ranges
+  h2_EovP_vs_blk->GetZaxis()->SetRangeUser(0.6,1.2);  
+
   // B.Print();  
   // M.Print();
 
@@ -482,6 +610,17 @@ void elas_calib()
   // // Time to calculate and report gain coefficients //
   // ////////////////////////////////////////////////////
 
+  TH1D *h_nevent_blk = new TH1D("h_nevent_blk", "No. of Good Events; ECAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_Ratio_blk = new TH1D("h_coeff_Ratio_blk", "Ratio of Gain Coefficients(new/old); ECAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_blk = new TH1D("h_coeff_blk", "ADC Gain Coefficients(GeV/pC); ECAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_blk_old = new TH1D("h_old_coeff_blk", "Old ADC Gain Coefficients(GeV/pC); ECAL Blocks", kNblks, 0, kNblks);
+  TH2D *h2_coeff_detView_bot = new TH2D("h2_coeff_detView_bot", "New ADC Gain Coefficients (Bottom 23 Rows)", kNcols, 0, kNcols, 23, 0, 23);
+  TH2D *h2_coeff_detView_old_bot = new TH2D("h2_coeff_detView_old_bot", "Old ADC Gain Coefficients (Bottom 23 Rows)", kNcols, 0, kNcols, 23, 0, 23);    
+  TH2D *h2_coeff_detView_mid = new TH2D("h2_coeff_detView_mid", "New ADC Gain Coefficients (Middle 23 Rows)", kNcols, 0, kNcols, 23, 23, 46);
+  TH2D *h2_coeff_detView_old_mid = new TH2D("h2_coeff_detView_old_mid", "Old ADC Gain Coefficients (Middle 23 Rows)", kNcols, 0, kNcols, 23, 23, 46);
+  TH2D *h2_coeff_detView_top = new TH2D("h2_coeff_detView_top", "New ADC Gain Coefficients (Top 23 Rows)", kNcols, 0, kNcols, 23, 46, 69);
+  TH2D *h2_coeff_detView_old_top = new TH2D("h2_coeff_detView_old_top", "Old ADC Gain Coefficients (Top 23 Rows)", kNcols, 0, kNcols, 23, 46, 69);
+  
   // Leave the bad channels out of the calculation
   for(Int_t j = 0; j<kNblks; j++){
     badCells[j]=false;
@@ -502,27 +641,68 @@ void elas_calib()
   M_inv = M.Invert();
   CoeffR = M_inv*B;
 
-
+  // Filing histos and files with coefficients
+  int iblk=0;
+  ofstream outGain_data, outGainR_data;
+  outGain_data.open(outGain);
+  outGainR_data.open(outGainR);
   Double_t newADCgratio[kNblks];
   for (int i=0; i<kNblks; i++) { newADCgratio[i] = -1000; }  
+  std::vector<int> nColperRow = ReadNumFromTextFileToV("maps/ncol_per_row_ecal.txt");
+  for (int irow=0; irow<kNrows; irow++) {
+    int colMax = nColperRow[irow];
+    for (int icol=0; icol<colMax; icol++) {
+      
+      Double_t oldCoeff = oldADCgain[iblk];
+      Double_t gainRatio = CoeffR(iblk);
+      if(!badCells[iblk]) {
+	h_nevent_blk->Fill(iblk, nevents_per_blk[iblk]);
+	h_coeff_Ratio_blk->Fill(iblk, gainRatio);
+	h_coeff_blk->Fill(iblk, gainRatio*oldCoeff);
+	if (irow<23) {
+	  h2_coeff_detView_bot->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_bot->Fill(icol, irow, oldCoeff);
+	} else if (irow<46) {
+	  h2_coeff_detView_mid->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_mid->Fill(icol, irow, oldCoeff);
+	} else {
+	  h2_coeff_detView_top->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_top->Fill(icol, irow, oldCoeff);
+	}
 
-  for (int iblk=0; iblk<kNblks; iblk++) {
-    Double_t oldCoeff = oldADCgain[iblk];
-    if(!badCells[iblk]) {
-      newADCgratio[iblk] = CoeffR(iblk) * Corr_Factor_Enrg_Calib_w_Cosmic;
-    }else {
-     newADCgratio[iblk] = 1. * Corr_Factor_Enrg_Calib_w_Cosmic; 
-    }
-  }
+	// std::cout << gainRatio << "  ";
+	outGain_data << gainRatio * oldCoeff << " ";
+	outGainR_data << gainRatio << " ";	
+	newADCgratio[iblk] = gainRatio;
+      }else {
+	gainRatio = 1.; // (Important)
+	h_nevent_blk->Fill(iblk,nevents_per_blk[iblk]);
+	h_coeff_Ratio_blk->Fill(iblk, gainRatio);
+	h_coeff_blk->Fill(iblk, gainRatio*oldCoeff);
+	if (irow<23) {
+	  h2_coeff_detView_bot->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_bot->Fill(icol, irow, oldCoeff);
+	} else if (irow<46) {
+	  h2_coeff_detView_mid->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_mid->Fill(icol, irow, oldCoeff);
+	} else {
+	  h2_coeff_detView_top->Fill(icol, irow, gainRatio*oldCoeff);
+	  h2_coeff_detView_old_top->Fill(icol, irow, oldCoeff);
+	}
 
-  int blk = 0;
-  for (int i=0; i<46; i++) {
-    for (int j=0; j<36; j++) {
-      cout << newADCgratio[blk]*oldADCgain[blk] << " ";
-      blk += 1;
-    }
-    cout << "\n";
-  }
+	// std::cout << gainRatio << "  ";
+	outGain_data << gainRatio * oldCoeff << " ";
+	outGainR_data << gainRatio << " ";	
+	newADCgratio[iblk] = gainRatio;
+      }
+
+      iblk += 1;
+    } //col
+    // std::cout << std::endl;
+    outGain_data << std::endl;
+    outGainR_data << std::endl;    
+  } //row
+  std::cout << std::endl;
 
   //////////////////////////////////////////////////////////////////////
   // 2nd Loop over all events to check the performance of calibration //
@@ -567,6 +747,11 @@ void elas_calib()
       isECALedge = edgeECALblks.count((int)idblkECAL);
       if (isECALedge) continue;
 
+      // avoid events where seed is near known bad channels
+      if (cut_on_nearBADchan) {      
+	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,0);
+	if (isNearBadChan) continue;  // apply the cut
+      }
       
       TVector3 vertex(0,0,trVz[0]);
       
@@ -612,16 +797,16 @@ void elas_calib()
 	Double_t eclblkECAL_calib = eclblkECAL[blk] * newADCgratio[blkID];
 	
 	// if (eclblkECAL[blk]>sh_hit_threshold) {
-	  // Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
-	  // Double_t shengFrac = eclblkECAL[blk]/eclblkECAL[0];
-	  // if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
+	// Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
+	// Double_t shengFrac = eclblkECAL[blk]/eclblkECAL[0];
+	// if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
 	eECALcl_calib += eclblkECAL_calib;
-	    // filling cluster level histos
-	    // if (blk!=0) {
-	    //   h_ECALcltdiff->Fill(shtdiff);
-	    //   h2_ECALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
-	    // }
-	  // }
+	// filling cluster level histos
+	// if (blk!=0) {
+	//   h_ECALcltdiff->Fill(shtdiff);
+	//   h2_ECALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
+	// }
+	// }
 	// }
       }
       Double_t EovP_calib = eECALcl_calib/p_e_CURR;
@@ -660,7 +845,10 @@ void elas_calib()
     }
   }
   std::cout << "\n\n";
-  h2_EovP_vs_blk_calib->Divide(h2_EovP_vs_blk_raw_calib, h2_count_calib);  
+  h2_EovP_vs_blk_calib->Divide(h2_EovP_vs_blk_raw_calib, h2_count_calib);
+
+  // Let's customize the histogram ranges
+  h2_EovP_vs_blk_calib->GetZaxis()->SetRangeUser(0.6,1.2);    
 
   /////////////////////////////////
   // Generating diagnostic plots //
@@ -669,42 +857,42 @@ void elas_calib()
   //gStyle->SetPalette(kRainBow);
 
   /**** Canvas 1 (E/p) ****/
-  TCanvas *c1 = new TCanvas("c1","E/p",1500,1200);
+  TCanvas *c1 = new TCanvas("c1","E/p",1500,1000);
   c1->Divide(2,1);
   c1->cd(1); //
   gPad->SetGridx();
-  // Double_t param[3], param_bc[3], sigerr, sigerr_bc;
-  // Int_t maxBin_bc = h_EovP->GetMaximumBin();
-  // Double_t binW_bc = h_EovP->GetBinWidth(maxBin_bc), norm_bc = h_EovP->GetMaximum();
-  // Double_t mean_bc = h_EovP->GetMean(), stdev_bc = h_EovP->GetStdDev();
-  // Double_t lower_lim_bc = h_EovP_min + maxBin_bc*binW_bc - EovP_fit_width*stdev_bc;
-  // Double_t upper_lim_bc = h_EovP_min + maxBin_bc*binW_bc + EovP_fit_width*stdev_bc; 
-  // TF1* fitg_bc = new TF1("fitg_bc","gaus",h_EovP_min,h_EovP_max);
-  // fitg_bc->SetRange(lower_lim_bc,upper_lim_bc);
-  // fitg_bc->SetParameters(norm_bc,mean_bc,stdev_bc);
-  // fitg_bc->SetLineWidth(2); fitg_bc->SetLineColor(2);
-  // h_EovP->Fit(fitg_bc,"NO+QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
-  // h_EovP->SetLineWidth(2); h_EovP->SetLineColor(kGreen+2);
-  // Int_t maxBin = h_EovP_calib->GetMaximumBin();
-  // Double_t binW = h_EovP_calib->GetBinWidth(maxBin), norm = h_EovP_calib->GetMaximum();
-  // Double_t mean = h_EovP_calib->GetMean(), stdev = h_EovP_calib->GetStdDev();
-  // Double_t lower_lim = h_EovP_min + maxBin*binW - EovP_fit_width*stdev;
-  // Double_t upper_lim = h_EovP_min + maxBin*binW + EovP_fit_width*stdev; 
-  // TF1* fitg = new TF1("fitg","gaus",h_EovP_min,h_EovP_max);
-  // fitg->SetRange(lower_lim,upper_lim);
-  // fitg->SetParameters(norm,mean,stdev);
-  // fitg->SetLineWidth(2); fitg->SetLineColor(2);
-  // h_EovP_calib->Fit(fitg,"QR"); fitg->GetParameters(param); sigerr = fitg->GetParError(2);
-  // h_EovP_calib->SetLineWidth(2); h_EovP_calib->SetLineColor(1);
-  // // adjusting histogram height for the legend to fit properly
-  // h_EovP_calib->GetYaxis()->SetRangeUser(0.,max(norm,norm_bc)*1.2);
+  Double_t param[3], param_bc[3], sigerr, sigerr_bc;
+  Int_t maxBin_bc = h_EovP->GetMaximumBin();
+  Double_t binW_bc = h_EovP->GetBinWidth(maxBin_bc), norm_bc = h_EovP->GetMaximum();
+  Double_t mean_bc = h_EovP->GetMean(), stdev_bc = h_EovP->GetStdDev();
+  Double_t lower_lim_bc = h_EovP_min + maxBin_bc*binW_bc - EovP_fit_width*stdev_bc;
+  Double_t upper_lim_bc = h_EovP_min + maxBin_bc*binW_bc + EovP_fit_width*stdev_bc; 
+  TF1* fitg_bc = new TF1("fitg_bc","gaus",h_EovP_min,h_EovP_max);
+  fitg_bc->SetRange(lower_lim_bc,upper_lim_bc);
+  fitg_bc->SetParameters(norm_bc,mean_bc,stdev_bc);
+  fitg_bc->SetLineWidth(2); fitg_bc->SetLineColor(2);
+  h_EovP->Fit(fitg_bc,"NO+QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
+  h_EovP->SetLineWidth(2); h_EovP->SetLineColor(kGreen+2);
+  Int_t maxBin = h_EovP_calib->GetMaximumBin();
+  Double_t binW = h_EovP_calib->GetBinWidth(maxBin), norm = h_EovP_calib->GetMaximum();
+  Double_t mean = h_EovP_calib->GetMean(), stdev = h_EovP_calib->GetStdDev();
+  Double_t lower_lim = h_EovP_min + maxBin*binW - EovP_fit_width*stdev;
+  Double_t upper_lim = h_EovP_min + maxBin*binW + EovP_fit_width*stdev; 
+  TF1* fitg = new TF1("fitg","gaus",h_EovP_min,h_EovP_max);
+  fitg->SetRange(lower_lim,upper_lim);
+  fitg->SetParameters(norm,mean,stdev);
+  fitg->SetLineWidth(2); fitg->SetLineColor(2);
+  h_EovP_calib->Fit(fitg,"QR"); fitg->GetParameters(param); sigerr = fitg->GetParError(2);
+  h_EovP_calib->SetLineWidth(2); h_EovP_calib->SetLineColor(1);
+  // adjusting histogram height for the legend to fit properly
+  h_EovP_calib->GetYaxis()->SetRangeUser(0.,max(norm,norm_bc)*1.2);
   h_EovP_calib->Draw(); h_EovP->Draw("same");
-  // // draw the legend
-  // TLegend *l = new TLegend(0.10,0.78,0.90,0.90);
-  // l->SetTextFont(42);
-  // l->AddEntry(h_EovP,Form("Before calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100),"l");
-  // l->AddEntry(h_EovP_calib,Form("After calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100),"l");
-  // l->Draw();
+  // draw the legend
+  TLegend *l = new TLegend(0.10,0.78,0.90,0.90);
+  l->SetTextFont(42);
+  l->AddEntry(h_EovP,Form("Before calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100),"l");
+  l->AddEntry(h_EovP_calib,Form("After calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100),"l");
+  l->Draw();
   c1->cd(2); //
   TPad *pad1 = new TPad("pad1", "Top Pad", 0.0, 0.5, 1.0, 1.0);
   pad1->Draw();
@@ -732,7 +920,7 @@ void elas_calib()
   // c1->cd(6); //
   // h2_EovP_vs_PSblk_calib->SetStats(0);
   // h2_EovP_vs_PSblk_calib->Draw("colz text");
-  // c1->SaveAs(Form("%s[",outPlot.Data())); c1->SaveAs(Form("%s",outPlot.Data())); c1->Write();
+  c1->SaveAs(Form("%s[",outPlot.Data())); c1->SaveAs(Form("%s",outPlot.Data())); c1->Write();
   //**** -- ***//
 
   // /**** Canvas 2 (Corr. with tr vars.) ****/
@@ -744,88 +932,74 @@ void elas_calib()
   c2->cd(2); //
   h2_EovP_vs_blk_calib->SetStats(0);
   h2_EovP_vs_blk_calib->Draw("colz");
+  c2->SaveAs(Form("%s",outPlot.Data())); c2->Write();
+  //**** -- ***//
   
-  // /**** Canvas 2 (Corr. with tr vars.) ****/
-  // TCanvas *c2 = new TCanvas("c2","tr X,Y,Th",1500,1200);
-  // c2->Divide(2,2);
-  // c2->cd(1); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trX->SetStats(0);
-  // h2_EovP_vs_trX->Draw("colz");
-  // c2->cd(2); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trY->SetStats(0);
-  // h2_EovP_vs_trY->Draw("colz");
-  // c2->cd(3); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trTh->SetStats(0);
-  // h2_EovP_vs_trTh->Draw("colz");
-  // c2->cd(4); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trX_calib->SetStats(0);
-  // h2_EovP_vs_trX_calib->Draw("colz");
-  // c2->cd(5); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trY_calib->SetStats(0);
-  // h2_EovP_vs_trY_calib->Draw("colz");
-  // c2->cd(6); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trTh_calib->SetStats(0);
-  // h2_EovP_vs_trTh_calib->Draw("colz");
-  // c2->SaveAs(Form("%s",outPlot.Data())); c2->Write();
-  // //**** -- ***//
+  /**** Canvas 3 (Corr. with tr vars.) ****/
+  TCanvas *c3 = new TCanvas("c3","E/p vs x, y exp",1500,1200);
+  c3->Divide(2,2);
+  c3->cd(1); //
+  gPad->SetGridy();
+  h2_EovP_vs_xECALexp->SetStats(0);
+  h2_EovP_vs_xECALexp->Draw("colz");
+  c3->cd(2); //
+  gPad->SetGridy();
+  h2_EovP_vs_yECALexp->SetStats(0);
+  h2_EovP_vs_yECALexp->Draw("colz");
+  c3->cd(3); //
+  gPad->SetGridy();
+  h2_EovP_vs_xECALexp_calib->SetStats(0);
+  h2_EovP_vs_xECALexp_calib->Draw("colz");
+  c3->cd(4); //
+  gPad->SetGridy();
+  h2_EovP_vs_yECALexp_calib->SetStats(0);
+  h2_EovP_vs_yECALexp_calib->Draw("colz");
+  c3->SaveAs(Form("%s",outPlot.Data())); c3->Write();
+  //**** -- ***//
 
-  // /**** Canvas 3 (Corr. with tr vars. contd.) ****/
-  // TCanvas *c3 = new TCanvas("c3","tr Ph,PS",1500,1200);
-  // c3->Divide(3,2);
-  // c3->cd(1); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trPh->SetStats(0);
-  // h2_EovP_vs_trPh->Draw("colz");
-  // c3->cd(2); //
-  // gPad->SetGridy();
-  // h2_PSeng_vs_trXatPS->SetStats(0);
-  // h2_PSeng_vs_trXatPS->Draw("colz");
-  // c3->cd(3); //
-  // gPad->SetGridy();
-  // h2_PSeng_vs_trYatPS->SetStats(0);
-  // h2_PSeng_vs_trYatPS->Draw("colz");
-  // c3->cd(4); //
-  // gPad->SetGridy();
-  // h2_EovP_vs_trPh_calib->SetStats(0);
-  // h2_EovP_vs_trPh_calib->Draw("colz");
-  // c3->cd(5); //
-  // gPad->SetGridy();
-  // h2_PSeng_vs_trXatPS_calib->SetStats(0);
-  // h2_PSeng_vs_trXatPS_calib->Draw("colz");
-  // c3->cd(6); //
-  // gPad->SetGridy();
-  // h2_PSeng_vs_trYatPS_calib->SetStats(0);
-  // h2_PSeng_vs_trYatPS_calib->Draw("colz");
-  // c3->SaveAs(Form("%s",outPlot.Data())); c3->Write();
-  // //**** -- ***//
+  /**** Canvas 4 (Corr. with tr vars.) ****/
+  TCanvas *c4 = new TCanvas("c4","eECAL vs x, y exp",1500,1200);
+  c4->Divide(2,2);
+  c4->cd(1); //
+  gPad->SetGridy();
+  h2_eECAL_vs_xECALexp->SetStats(0);
+  h2_eECAL_vs_xECALexp->Draw("colz");
+  c4->cd(2); //
+  gPad->SetGridy();
+  h2_eECAL_vs_yECALexp->SetStats(0);
+  h2_eECAL_vs_yECALexp->Draw("colz");
+  c4->cd(3); //
+  gPad->SetGridy();
+  h2_eECAL_vs_xECALexp_calib->SetStats(0);
+  h2_eECAL_vs_xECALexp_calib->Draw("colz");
+  c4->cd(4); //
+  gPad->SetGridy();
+  h2_eECAL_vs_yECALexp_calib->SetStats(0);
+  h2_eECAL_vs_yECALexp_calib->Draw("colz");
+  c4->SaveAs(Form("%s",outPlot.Data())); c4->Write();
+  //**** -- ***//
 
-  // /**** Canvas 4 (position resolution) ****/
-  // TCanvas *c4 = new TCanvas("c4","pos. res.",1200,1000);
-  // c4->Divide(2,2);  gStyle->SetOptFit(1111);
-  // c4->cd(1); //
-  // TF1* fit_c41 = new TF1("fit_c41","gaus",-0.5,0.5);
-  // h_shX_diff->Fit(fit_c41,"QR");
-  // h_shX_diff->SetStats(1);
-  // c4->cd(2); //
-  // TF1* fit_c42 = new TF1("fit_c42","gaus",-0.5,0.5);
-  // h_shY_diff->Fit(fit_c42,"QR");
-  // h_shY_diff->SetStats(1);
-  // c4->cd(3); //
-  // TF1* fit_c43 = new TF1("fit_c43","gaus",-0.5,0.5);
-  // h_shX_diff_calib->Fit(fit_c43,"QR");
-  // h_shX_diff_calib->SetStats(1);
-  // c4->cd(4); //
-  // TF1* fit_c44 = new TF1("fit_c44","gaus",-0.5,0.5);
-  // h_shY_diff_calib->Fit(fit_c44,"QR");
-  // h_shY_diff_calib->SetStats(1);
-  // c4->SaveAs(Form("%s",outPlot.Data())); c4->Write();
-  // //**** -- ***//
+  /**** Canvas 5 (position resolution) ****/
+  TCanvas *c5 = new TCanvas("c5","pos. res.",1200,1000);
+  c5->Divide(2,2);  gStyle->SetOptFit(1111);
+  c5->cd(1); //
+  TF1* fit_c51 = new TF1("fit_c51","gaus",-0.5,0.5);
+  h_xECAL_diff->Fit(fit_c51,"QR");
+  h_xECAL_diff->SetStats(1);
+  c5->cd(2); //
+  TF1* fit_c52 = new TF1("fit_c52","gaus",-0.5,0.5);
+  h_yECAL_diff->Fit(fit_c52,"QR");
+  h_yECAL_diff->SetStats(1);
+  c5->cd(3); //
+  TF1* fit_c53 = new TF1("fit_c53","gaus",-0.5,0.5);
+  h_xECAL_diff_calib->Fit(fit_c53,"QR");
+  h_xECAL_diff_calib->SetStats(1);
+  c5->cd(4); //
+  TF1* fit_c54 = new TF1("fit_c54","gaus",-0.5,0.5);
+  h_yECAL_diff_calib->Fit(fit_c54,"QR");
+  h_yECAL_diff_calib->SetStats(1);
+  c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
+  //**** -- ***//
 
   // /**** Canvas 5 (E/p vs. run number) ****/
   // TCanvas *c5 = new TCanvas("c5","E/p vs rnum",1200,1000);
@@ -849,33 +1023,63 @@ void elas_calib()
   // c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
   // //**** -- ***//
 
-  // /**** Canvas 6 (gain coefficients) ****/
-  // TCanvas *c6 = new TCanvas("c6","gain Coeff",1200,1000);
-  // c6->Divide(2,2);
-  // c6->cd(1); Double_t h_max;
-  // h_max = h_old_coeff_blk_SH->GetMaximum();
-  // h2_old_coeff_detView_SH->GetZaxis()->SetRangeUser(0.,h_max); h2_old_coeff_detView_SH->Draw("text col");
-  // c6->cd(2); //
-  // h_max = h_coeff_blk_SH->GetMaximum();
-  // h2_coeff_detView_SH->GetZaxis()->SetRangeUser(0.,h_max); h2_coeff_detView_SH->Draw("text col");
-  // c6->cd(3); //
-  // h_max = h_old_coeff_blk_PS->GetMaximum();
-  // h2_old_coeff_detView_PS->GetZaxis()->SetRangeUser(0.,h_max); h2_old_coeff_detView_PS->Draw("text col");
-  // c6->cd(4); //
-  // h_max = h_coeff_blk_PS->GetMaximum();
-  // h2_coeff_detView_PS->GetZaxis()->SetRangeUser(0.,h_max); h2_coeff_detView_PS->Draw("text col");
-  // c6->SaveAs(Form("%s",outPlot.Data())); c6->Write();
-  // //**** -- ***//
+  /**** Canvas 7 (gain coefficients TOP) ****/
+  TCanvas *c7 = new TCanvas("c7","gain Coeff top",1200,1000);
+  TStyle* oldStyle = (TStyle*)gStyle->Clone("oldStyle");
+  gStyle->SetPaintTextFormat("0.4f");  
+  c7->Divide(1,2);
+  c7->cd(1); Double_t h_max;  
+  h_max = h_coeff_blk_old->GetMaximum();
+  h2_coeff_detView_old_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_top->Draw("text col");
+  c7->cd(2); //
+  h_max = h_coeff_blk->GetMaximum();
+  h2_coeff_detView_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_top->Draw("text col");
+  //
+  c7->SaveAs(Form("%s",outPlot.Data())); c7->Write();
+  //**** -- ***//
 
-  // /**** Canvas 8 (# events per block) ****/
-  // TCanvas *c8 = new TCanvas("c8","good ev per blk",1200,1000);
-  // c8->Divide(2,1);
-  // c8->cd(1); //
-  // h2_nev_per_SHblk->Draw("colz text");
-  // c8->cd(2); //
-  // h2_nev_per_PSblk->Draw("colz text");
-  // c8->SaveAs(Form("%s",outPlot.Data())); c8->Write();
-  // //**** -- ***//
+  /**** Canvas 8 (gain coefficients MIDDLE) ****/
+  TCanvas *c8 = new TCanvas("c8","gain Coeff mid",1200,1000);
+  c8->Divide(1,2);
+  c8->cd(1); 
+  h_max = h_coeff_blk_old->GetMaximum();
+  h2_coeff_detView_old_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_mid->Draw("text col");
+  c8->cd(2); //
+  h_max = h_coeff_blk->GetMaximum();
+  h2_coeff_detView_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_mid->Draw("text col");
+  //
+  c8->SaveAs(Form("%s",outPlot.Data())); c8->Write();
+  //**** -- ***//
+
+  /**** Canvas 9 (gain coefficients BOTTOM) ****/
+  TCanvas *c9 = new TCanvas("c9","gain Coeff bot",1200,1000);
+  c9->Divide(1,2);
+  c9->cd(1); 
+  h_max = h_coeff_blk_old->GetMaximum();
+  h2_coeff_detView_old_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_bot->Draw("text col");
+  c9->cd(2); //
+  h_max = h_coeff_blk->GetMaximum();
+  h2_coeff_detView_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_bot->Draw("text col");
+  //
+  c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
+  //
+  gStyle->SetPaintTextFormat(oldStyle->GetPaintTextFormat());
+  delete oldStyle;
+  //**** -- ***//
+
+  /**** Canvas 10 (# events per block) ****/
+  TCanvas *c10 = new TCanvas("c10","good ev per blk",1500,1200);
+  c10->cd();
+  gStyle->SetPaintTextFormat("0.0f");
+  h2_nev_per_blk->SetMarkerSize(0.6);
+  h2_nev_per_blk->Draw("colz text");
+  // c10->Divide(1,2);
+  // c10->cd(1); //
+  // h2_nev_per_blk_bot->Draw("colz text");
+  // c10->cd(2); //
+  // h2_nev_per_blk_top->Draw("colz text");
+  c10->SaveAs(Form("%s",outPlot.Data())); c10->Write();
+  //**** -- ***//
 
   // /**** Canvas 9 (cluster size) ****/
   // TCanvas *c9 = new TCanvas("c9","cl. size vs rnum",1200,1000);
@@ -889,77 +1093,60 @@ void elas_calib()
   // h2_PSclmult_vs_rnum->Draw("colz");
   // h2_PSclmult_vs_rnum_prof->Draw("same");
   // c9->cd(3); //
-  // Custm2DRnumHisto(h2_SHclsize_vs_rnum,lrnum); 
-  // h2_SHclsize_vs_rnum->Draw("colz");
-  // h2_SHclsize_vs_rnum_prof->Draw("same");
+  // Custm2DRnumHisto(h2clsize_vs_rnum,lrnum); 
+  // h2clsize_vs_rnum->Draw("colz");
+  // h2clsize_vs_rnum_prof->Draw("same");
   // c9->cd(4); //
-  // Custm2DRnumHisto(h2_SHclmult_vs_rnum,lrnum);
-  // h2_SHclmult_vs_rnum->Draw("colz");
-  // h2_SHclmult_vs_rnum_prof->Draw("same");
+  // Custm2DRnumHisto(h2clmult_vs_rnum,lrnum);
+  // h2clmult_vs_rnum->Draw("colz");
+  // h2clmult_vs_rnum_prof->Draw("same");
   // c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
   // //**** -- ***//
 
-  // /**** Summary Canvas ****/
-  // TCanvas *cSummary = new TCanvas("cSummary","Summary");
-  // cSummary->cd();
-  // TPaveText *pt = new TPaveText(.05,.1,.95,.8);
-  // pt->AddText(Form(" Date of creation: %s",GetDate().c_str()));
-  // pt->AddText(Form("Configfile: BBCal_replay/macros/Combined_macros/cfg/%s.cfg",cfgfilebase.Data()));
-  // pt->AddText(Form(" Total # events analyzed: %lld, Preparing for replay pass: %d",Nevents,ppass));
-  // pt->AddText(Form(" E/p (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
-  // pt->AddText(Form(" E/p (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
-  // pt->AddText(" Global cuts: ");
-  // std::string tmpstr = "";
-  // for (std::size_t i=0; i<gCutList.size(); i++) {
-  //   if (i>0 && i%3==0) {pt->AddText(Form(" %s",tmpstr.c_str())); tmpstr="";}
-  //   tmpstr += gCutList[i] + ", "; 
-  // }
-  // if (!tmpstr.empty()) pt->AddText(Form(" %s",tmpstr.c_str()));
-  // if (cut_on_psE) pt->AddText(Form(" PS cluster energy > %.1f GeV",psE_cut_limit));
-  // if (cut_on_clusE) pt->AddText(Form(" BBCAL cluster energy < %.1f GeV",clusE_cut_limit));
-  // if (cut_on_EovP) pt->AddText(Form(" |E/p - 1| < %.1f",EovP_cut_limit));
-  // if (cut_on_pmin && cut_on_pmax) pt->AddText(Form(" %.1f < p_recon < %.1f GeV/c",p_min_cut,p_max_cut));
-  // else if (cut_on_pmin) pt->AddText(Form(" p_recon > %.1f GeV/c",p_min_cut));
-  // else if (cut_on_pmax) pt->AddText(Form(" p_recon < %.1f GeV/c",p_max_cut));
-  // pt->AddText(Form(" # events passed global cuts: %lld", Ngoodevs));
-  // if (elastic_cut) {
-  //   pt->AddText(" Elastic cuts: ");
-  //   if (cut_on_W) pt->AddText(Form(" |W - %.3f| #leq %.1f*%.3f",W_mean,W_nsigma,W_sigma));
-  //   if (cut_on_PovPel) pt->AddText(Form(" |p/p_{el}(#theta) - %.3f| #leq %.1f*%.3f",PovPel_mean,PovPel_nsigma,PovPel_sigma));
-  //   if (cut_on_pspot) pt->AddText(" proton spot cut ranges: ");
-  //   if (cut_on_pspot) pt->AddText(Form("  #Deltax (m): Mean = %.4f, %.1f#sigma = %.4f",pspot_dxM,pspot_ndxS,pspot_dxS));
-  //   if (cut_on_pspot) pt->AddText(Form("  #Deltay (m): Mean = %.4f, %.1f#sigma = %.4f",pspot_dyM,pspot_ndyS,pspot_dyS));
-  //   pt->AddText(Form(" # events passed global & elastic cuts: %lld", Nelasevs));
-  //   TText *tel = pt->GetLineWith(" Elastic"); tel->SetTextColor(kBlue);
-  // }
-  // pt->AddText(" Other cuts: ");
-  // pt->AddText(Form(" Minimum # events per block: %d | Cluster hit threshold: %.2f GeV (SH), %.2f GeV (PS)",Nmin,sh_hit_threshold,ps_hit_threshold));
-  // pt->AddText(Form(" Cluster tmax cut: %.1f ns (SH), %.1f ns (PS) | Cluster energy fraction cut: %.1f GeV (SH), %.1f GeV (PS)",sh_tmax_cut,ps_tmax_cut,sh_engFrac_cut,ps_engFrac_cut));
+  /**** Summary Canvas ****/
+  TCanvas *cSummary = new TCanvas("cSummary","Summary");
+  cSummary->cd();
+  TPaveText *pt = new TPaveText(.05,.1,.95,.8);
+  pt->AddText(Form(" Date of creation: %s",GetDate().c_str()));
+  pt->AddText(Form("Configfile: ECAL_replay/scripts/cfg/%s.cfg",cfgfilebase.Data()));
+  pt->AddText(Form(" Total # events analyzed: %lld ",Nevents));
+  pt->AddText(Form(" E/p (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
+  pt->AddText(Form(" E/p (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
+  pt->AddText(" Global cuts: ");
+  std::string tmpstr = "";
+  for (std::size_t i=0; i<gCutList.size(); i++) {
+    if (i>0 && i%3==0) {pt->AddText(Form(" %s",tmpstr.c_str())); tmpstr="";}
+    tmpstr += gCutList[i] + ", "; 
+  }
+  if (!tmpstr.empty()) pt->AddText(Form(" %s",tmpstr.c_str()));
+  if (cut_on_eECAL) pt->AddText(Form(" ECAL cluster energy < %.1f GeV",eECAL_cut_limit));
+  if (cut_on_EovP) pt->AddText(Form(" |E/p - 1| < %.1f",EovP_cut_limit));
+  pt->AddText(Form(" # events passed global cuts: %lld", Ngoodevs));
+  pt->AddText(" Other cuts: ");
+  pt->AddText(Form(" Minimum # events per block: %d | Cluster hit threshold: %.2f GeV",Nmin,hit_threshold));
+  pt->AddText(Form(" Cluster tmax cut: %.1f ns | Cluster energy fraction cut: %.1f GeV",tmax_cut,engFrac_cut));
   // pt->AddText(" Various offsets: ");
-  // pt->AddText(Form(" Momentum fudge factor: %.2f, BBCAL cluster energy scale factor: %.2f",p_rec_Offset,cF));
-  // if (mom_calib) pt->AddText(Form(" Mom. calib. params: A = %.9f, B = %.9f, C = %.1f, Avy = %.6f, Bvy = %.6f, #theta^{GEM}_{pitch} = %.1f^{o}, d_{BB} = %.4f m",A_fit,B_fit,C_fit,Avy_fit,Bvy_fit,GEMpitch,bb_magdist));
-  // sw->Stop(); sw2->Stop();
-  // pt->AddText(Form("Macro processing time: CPU %.1fs | Real %.1fs",sw->CpuTime(),sw->RealTime()));
-  // TText *t1 = pt->GetLineWith("Configfile"); t1->SetTextColor(kRed+2);
-  // TText *t2 = pt->GetLineWith(" E/p (be"); t2->SetTextColor(kRed);
-  // TText *t3 = pt->GetLineWith(" E/p (af"); t3->SetTextColor(kGreen+2);
-  // TText *t4 = pt->GetLineWith(" Global"); t4->SetTextColor(kBlue);
-  // TText *t5 = pt->GetLineWith(" Other"); t5->SetTextColor(kBlue);
+  // pt->AddText(Form(" Momentum fudge factor: %.2f, BBCAL cluster energy scale factor: %.2f",p_p_offset,cF));
+  sw->Stop(); sw2->Stop();
+  pt->AddText(Form("Macro processing time: CPU %.1fs | Real %.1fs",sw->CpuTime(),sw->RealTime()));
+  TText *t1 = pt->GetLineWith("Configfile"); t1->SetTextColor(kRed+2);
+  TText *t2 = pt->GetLineWith(" E/p (be"); t2->SetTextColor(kRed);
+  TText *t3 = pt->GetLineWith(" E/p (af"); t3->SetTextColor(kGreen+2);
+  TText *t4 = pt->GetLineWith(" Global"); t4->SetTextColor(kBlue);
+  TText *t5 = pt->GetLineWith(" Other"); t5->SetTextColor(kBlue);
   // TText *t6 = pt->GetLineWith(" Various"); t6->SetTextColor(kBlue);
-  // TText *t7 = pt->GetLineWith("Macro"); t7->SetTextColor(kGreen+3);
-  // pt->Draw();
-  // cSummary->SaveAs(Form("%s",outPlot.Data())); cSummary->SaveAs(Form("%s]",outPlot.Data())); cSummary->Write();  
-  // //**** -- ***//
+  TText *t7 = pt->GetLineWith("Macro"); t7->SetTextColor(kGreen+3);
+  pt->Draw();
+  cSummary->SaveAs(Form("%s",outPlot.Data())); cSummary->SaveAs(Form("%s]",outPlot.Data())); cSummary->Write();  
+  //**** -- ***//
 
-  // std::cout << "List of output files:" << "\n";
-  // std::cout << " --------- " << "\n";
-  // std::cout << " 1. Summary plots : "        << outPlot << "\n";
-  // std::cout << " 2. Resulting histograms : " << outFile << "\n";
-  // std::cout << " 3. Gain ratios (new/old) for SH : " << gainRatio_SH << "\n";
-  // std::cout << " 4. Gain ratios (new/old) for PS : " << gainRatio_PS << "\n";
-  // std::cout << " 5. New ADC gain coeffs. (GeV/pC) for SH : " << adcGain_SH << "\n";
-  // std::cout << " 6. New ADC gain coeffs. (GeV/pC) for PS : " << adcGain_PS << "\n";
-  // std::cout << " --------- " << "\n";
+  std::cout << "List of output files:" << "\n";
+  std::cout << " --------- " << "\n";
+  std::cout << " 1. Summary plots : "        << outPlot << "\n";
+  std::cout << " 2. Resulting histograms : " << outFile << "\n";
+  std::cout << " 3. Gain ratios (new/old) : " << outGainR << "\n";
+  std::cout << " 5. New ADC gain coeffs. (GeV/pC) : " << outGain << "\n";
+  std::cout << " --------- " << "\n";
   
   std::cout << "CPU time = " << sw->CpuTime() << "s. Real time = " << sw->RealTime() << "s.\n\n";
 
@@ -981,7 +1168,12 @@ void elas_calib()
   h2_EovP_vs_yECALexp->Write(); h2_EovP_vs_yECALexp_calib->Write();
   h2_eECAL_vs_xECALexp->Write(); h2_eECAL_vs_xECALexp_calib->Write();
   h2_eECAL_vs_yECALexp->Write(); h2_eECAL_vs_yECALexp_calib->Write();
-  //
+  // gains
+  h_nevent_blk->Write(); h_coeff_Ratio_blk->Write();
+  h_coeff_blk->Write(); h_coeff_blk_old->Write();
+  h2_coeff_detView_bot->Write(); h2_coeff_detView_old_bot->Write();  
+  h2_coeff_detView_mid->Write(); h2_coeff_detView_old_mid->Write();  
+  h2_coeff_detView_top->Write(); h2_coeff_detView_old_top->Write();  
   h2_nev_per_blk->Write();
 }
 
@@ -997,9 +1189,122 @@ std::string GetDate(){
   return date;
 }
 
+// splits a string by a delimiter (doesn't include empty sub-strings)
+std::vector<std::string> SplitString(char const delim, std::string const myStr) {
+  std::stringstream ss(myStr);
+  std::vector<std::string> out;
+  while (ss.good()) {
+    std::string substr;
+    std::getline(ss, substr, delim);
+    if (!substr.empty()) out.push_back(substr);
+  }
+  if (out.empty()) std::cerr << "WARNING! No substrings found!\n";
+  return out;
+}
+
+// returns output file base from configfilename
+TString GetOutFileBase(TString configfilename) {
+  std::vector<std::string> result;
+  result = SplitString('/',configfilename.Data());
+  TString temp = result[result.size() - 1];
+  return temp.ReplaceAll(".cfg", "");
+}
+
 // customizes profile histograms
 void CustmProfHisto(TH1* hprof) {
   hprof->SetStats(0);
   hprof->SetMarkerStyle(20);
   hprof->SetMarkerColor(2);
+}
+
+// Forms the matrices
+void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e) {
+#pragma omp parallel for schedule(static)
+  for (Int_t icol = 0; icol < kNblks; icol++) {
+    Double_t a_col = A[icol];  // Cache A[icol]
+    B(icol) += a_col;          // Update B using TVectorD
+    for (Int_t irow = 0; irow < kNblks; irow++) {
+      M(icol, irow) += a_col * A[irow] / p_e;
+    }
+  }
+}
+
+// Reads from a text file
+std::vector<int> ReadNumFromTextFileToV(const std::string &filename) {
+  std::vector<int> numVec;
+  std::ifstream file(filename);
+  int num;
+  // Check if the file was successfully opened
+  if (!file) {
+    throw std::runtime_error("Error: Unable to open file " + filename);
+  }
+  while (file >> num) {
+    numVec.push_back(num);
+  }
+  return numVec;
+}
+
+// Reads from a text file
+std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename) {
+  std::unordered_set<int> numSet;
+  std::ifstream file(filename);
+  int num;
+  // Check if the file was successfully opened
+  if (!file) {
+    throw std::runtime_error("Error: Unable to open file " + filename);
+  }
+  while (file >> num) {
+    numSet.insert(num);
+  }
+  return numSet;
+}
+
+// Read the x,y positions of the known BAD channels
+std::vector<std::pair<double, double>> ReadXYPosBADChan(const std::string& filename) {
+  std::vector<std::pair<double, double>> positions;
+  std::ifstream file(filename);
+    
+  if (!file.is_open()) {
+    throw std::runtime_error("Could not open file: " + filename);
+  }
+
+  std::string line;
+    
+  // Skip the header
+  std::getline(file, line);
+
+  while (std::getline(file, line)) {
+    std::stringstream ss(line);
+    std::string token;
+    int col = 0;
+    double xpos = 0.0, ypos = 0.0;
+
+    while (std::getline(ss, token, ',')) {
+      if (col == 1) xpos = std::stod(token);
+      else if (col == 2) ypos = std::stod(token);
+      col++;
+    }
+
+    positions.emplace_back(xpos, ypos);
+  }
+
+  return positions;
+}
+
+// Checks if the seed is near a known bad channel
+bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, double xSEED, double ySEED, double r2_max, int debug) {
+  bool nearBADchan = false;
+  double dx, dy;
+  for (const auto& [refX, refY] : xyBADchan) {
+    dx = xSEED - refX;
+    dy = ySEED - refY;
+    if ((dx * dx + dy * dy) < r2_max) {
+      nearBADchan = true;
+      break;
+    }
+  }
+  if (nearBADchan && debug>0) {
+    std::cout << Form("xSEED - xBADch=%.6f, ySEED - yBADch=%.6f\n",dx,dy);
+  }
+  return nearBADchan;
 }
