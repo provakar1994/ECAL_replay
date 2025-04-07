@@ -1,3 +1,18 @@
+/*
+  This script has been prepared for the energy calibration of ECAL detector located in GEpV electron arm. 
+  It does so by minimizing the chi2 of the difference between calorimeter cluster energy and the reconstructed 
+  scattered electron momentum calculated based on the reconstructed proton track assuming elastic scattering. 
+  It gets the old adc gain coefficients (GeV/pC) from tree and writes out the new adc gain coeffs. and 
+  ratios (New/Old) to file. One needs a configfile to execute this script [see cfg/example.cfg]. To execute, do:
+  ----
+  [a-onl@aonl2 macros]$ pwd
+  /adaqfs/home/a-onl/sbs/ECal_replay/scripts
+  [a-onl@aonl2 scripts]$ root -l 
+  root [0] .x elas_calib.C("cfg/example.cfg")
+  ----
+  P. Datta  <pdbforce@jlab.org>  CREATED  07 April 2025
+*/
+
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -33,7 +48,8 @@ bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, doub
   
 // Main function
 void elas_calib(char const *configfilename,
-		bool isdebug=0) //0=False, 1=True
+		char const *prefix="",  //prefix to the output file names
+		int isdebug=0)          //0=>False, >0=>True
 {
   gErrorIgnoreLevel = kError; // Ignores all ROOT warnings
 
@@ -301,11 +317,11 @@ void elas_calib(char const *configfilename,
   
   // Creating output ROOT file to contain histograms
   TString outFile, outPlot, outGain, outGainR;
-  char const * debug = isdebug ? "_test" : "";
-  outFile = Form("%s/hist/%s%s.root",macros_dir.Data(),cfgfilebase.Data(),debug);
-  outPlot = Form("%s/plots/%s%s.pdf",macros_dir.Data(),cfgfilebase.Data(),debug);
-  outGain = Form("%s/gain/%s_gainCoeff%s.txt",macros_dir.Data(),cfgfilebase.Data(),debug);  
-  outGainR = Form("%s/gain/%s_gainRatio%s.txt",macros_dir.Data(),cfgfilebase.Data(),debug);  
+  // char const * debug = isdebug ? "_test" : "";
+  outFile = Form("%s/hist/%s_%s.root",macros_dir.Data(),prefix,cfgfilebase.Data());
+  outPlot = Form("%s/plots/%s_%s.pdf",macros_dir.Data(),prefix,cfgfilebase.Data());
+  outGain = Form("%s/gain/%s_%s_gainCoeff.txt",macros_dir.Data(),prefix,cfgfilebase.Data());  
+  outGainR = Form("%s/gain/%s_%s_gainRatio.txt",macros_dir.Data(),prefix,cfgfilebase.Data());  
 
   //std::unique_ptr<TFile> fout( TFile::Open(outFile, "RECREATE") );
   TFile *fout = new TFile(outFile, "RECREATE");
@@ -436,7 +452,7 @@ void elas_calib(char const *configfilename,
 
       // avoid events where seed is near known bad channels
       if (cut_on_nearBADchan) {
-	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,0);
+	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,isdebug);
 	if (isNearBadChan) continue;  // apply the cut
       }
 
@@ -749,7 +765,7 @@ void elas_calib(char const *configfilename,
 
       // avoid events where seed is near known bad channels
       if (cut_on_nearBADchan) {      
-	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,0);
+	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,isdebug);
 	if (isNearBadChan) continue;  // apply the cut
       }
       
@@ -870,9 +886,9 @@ void elas_calib(char const *configfilename,
   TF1* fitg_bc = new TF1("fitg_bc","gaus",h_EovP_min,h_EovP_max);
   fitg_bc->SetRange(lower_lim_bc,upper_lim_bc);
   fitg_bc->SetParameters(norm_bc,mean_bc,stdev_bc);
-  fitg_bc->SetLineWidth(2); fitg_bc->SetLineColor(2);
-  h_EovP->Fit(fitg_bc,"NO+QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
-  h_EovP->SetLineWidth(2); h_EovP->SetLineColor(kGreen+2);
+  fitg_bc->SetLineWidth(2); fitg_bc->SetLineColor(1);
+  h_EovP->Fit(fitg_bc,"QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
+  h_EovP->SetLineWidth(2); h_EovP->SetLineColor(kRed); h_EovP->SetFillColorAlpha(kRed,0.4);
   Int_t maxBin = h_EovP_calib->GetMaximumBin();
   Double_t binW = h_EovP_calib->GetBinWidth(maxBin), norm = h_EovP_calib->GetMaximum();
   Double_t mean = h_EovP_calib->GetMean(), stdev = h_EovP_calib->GetStdDev();
@@ -881,9 +897,9 @@ void elas_calib(char const *configfilename,
   TF1* fitg = new TF1("fitg","gaus",h_EovP_min,h_EovP_max);
   fitg->SetRange(lower_lim,upper_lim);
   fitg->SetParameters(norm,mean,stdev);
-  fitg->SetLineWidth(2); fitg->SetLineColor(2);
+  fitg->SetLineWidth(2); fitg->SetLineColor(1);
   h_EovP_calib->Fit(fitg,"QR"); fitg->GetParameters(param); sigerr = fitg->GetParError(2);
-  h_EovP_calib->SetLineWidth(2); h_EovP_calib->SetLineColor(1);
+  h_EovP_calib->SetLineWidth(2); h_EovP_calib->SetLineColor(kGreen+2); h_EovP_calib->SetFillColorAlpha(kGreen+2,0.4);
   // adjusting histogram height for the legend to fit properly
   h_EovP_calib->GetYaxis()->SetRangeUser(0.,max(norm,norm_bc)*1.2);
   h_EovP_calib->Draw(); h_EovP->Draw("same");
@@ -1303,7 +1319,7 @@ bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, doub
       break;
     }
   }
-  if (nearBADchan && debug>0) {
+  if (nearBADchan && debug>1) {
     std::cout << Form("xSEED - xBADch=%.6f, ySEED - yBADch=%.6f\n",dx,dy);
   }
   return nearBADchan;
