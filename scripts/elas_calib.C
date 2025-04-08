@@ -565,7 +565,6 @@ void elas_calib(char const *configfilename,
 	Double_t eclblkECAL_i = eclblkECAL[blk];
 	A[blkID] += eclblkECAL_i;
 	eECALcl += eclblkECAL_i;
-	//ClusEngECAL += eclblkECAL_i;
 	// filling cluster level histos
 	// if (blk!=0) {
 	//   h_ECALcltdiff->Fill(shtdiff);
