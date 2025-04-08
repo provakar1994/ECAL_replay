@@ -1,0 +1,4 @@
+#/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_*.root
+/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_1.root
+#/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_1.root
+#/lustre24/expphy/volatile/halla/sbs/pdbforce/gep/mc/elas/replayed_GEP1_job_2.root  

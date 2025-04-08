@@ -106,7 +106,7 @@ void elas_calib(char const *configfilename,
   bool isECALedge = false;
 
   // Reading bad ECAL module channels
-  std::vector<std::pair<double, double>> xyBADchan = ReadXYPosBADChan("maps/bad_ecal_channels_04_05_25.csv");
+  std::vector<std::pair<double, double>> xyBADchan = ReadXYPosBADChan("maps/bad_ecal_channels_04_08_25.csv");
   bool cut_on_nearBADchan, isNearBadChan = false;
   Double_t r_max, r2_max;
   
