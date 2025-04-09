@@ -235,7 +235,7 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
   
   vector<int> pmt_list;
 
-  int time_mean[1656];
+  int time_mean[1656] = {0};
   int time_bad_list[1656] = {0};
   int time_entries_list[1656] = {0};
   int time_outlier_list[1656] = {0};
@@ -615,12 +615,15 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
 
 	time_pmt_is[n]->Fit( fgaus2,"+RQ" );//kip
 	time_mean[n] = fgaus2->GetParameter(1);
+	cout << n << " " << fgaus2->GetParameter(0) << " " << fgaus2->GetParameter(1) << endl;
 	fgaus2->GetParameters(Parstime);
 
 	time_outlier_list[n] = 195 - time_mean[n];
+
+	//cout << n << " " << time_mean[n] << endl;
 	
 	//if(time_pmt_is[n]->GetEntries() < 100 && abs(time_outlier_list[n] > 20)){
-	if(abs(time_outlier_list[n] > 20)){
+	if(abs(time_outlier_list[n] > 15)){
 	  time_bad_list[n] = 1;
 	}
 
@@ -850,7 +853,7 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
 
      TString time_outlier_txt;
      
-     time_outlier_txt = Form("time_outliers%i.txt", runis);
+     time_outlier_txt = Form("time_outliers_%i.txt", runis);
      
      ofstream time_bad_file(time_outlier_txt);
 
@@ -859,8 +862,10 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
      for(int i = 0; i < 1656; i++){
        if(time_bad_list[i] == 1){
 	 time_bad_file << i << " " << time_entries_list[i] << " " << time_outlier_list[i] << " " << time_mean[i] << endl;
+	 cout  << "Channel index: " << i << ", num of entries for that channel: " << time_entries_list[i] << ", difference in ns from desired time:  " << time_outlier_list[i] << ", timing peak: " << time_mean[i] << endl;
        }
      }
+     cout << "this list of channels with bad timing peaks is also a text file found at /textfiles/time_outliers_" << runis << ".txt, now you should use the root script generate_fadc_timing_delays.C in order to get the new delays in order to fix these bad timing peaks." << endl;
      
      for(int m = 0; m < 1655; m++){//1620-1625,
 
