@@ -17,6 +17,8 @@
 #include <fstream>
 #include <vector>
 
+#include "LookUpTableReader.h"
+
 /*
   Convention:
   Pei + Ppi = Pef + Ppf
@@ -43,7 +45,7 @@ void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e);
 std::vector<int> ReadNumFromTextFileToV(const std::string &filename);
 std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename);
 std::vector<std::string> SplitString(char const delim, std::string const myStr);
-std::vector<std::pair<double, double>> ReadXYPosBADChan(const std::string& filename);
+std::vector<std::pair<double, double>> GetXYPosBADChan(LookUpTableReader&,std::vector<int>&,bool);
 bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, double xSEED, double ySEED, double r2_max, int debug);
   
 // Main function
@@ -64,7 +66,7 @@ void elas_calib(char const *configfilename,
 
   // Defining important variables
   // misc
-  TString macros_dir;
+  TString macros_dir, badchan_file;
   Int_t Nmin=10;
   Double_t minMBratio=0.1;  
   // ECAL related
@@ -79,7 +81,8 @@ void elas_calib(char const *configfilename,
   Double_t h2_p_bin = 200, h2_p_min = 0., h2_p_max = 5.;  
   Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
   // analysis related
-  bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0;
+  bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0, cut_on_nearBADchan=0;
+  Double_t r_max, r2_max;
   Double_t W2_mean, W2_sigma, W2_nsigma;
   Double_t EovP_cut_limit, eECAL_cut_limit;
   Double_t hit_threshold=0., engFrac_cut=0., tmax_cut=1000.;    
@@ -100,15 +103,6 @@ void elas_calib(char const *configfilename,
   TMatrixD M(kNblks,kNblks), M_inv(kNblks,kNblks);
   TVectorD B(kNblks), CoeffR(kNblks);  
   Double_t A[kNblks];
-
-  // Reading module IDs of ECAL blocks at the edge
-  std::unordered_set<int> edgeECALblks = ReadNumFromTextFileToUOS("maps/edge_blocks_ecal.txt");
-  bool isECALedge = false;
-
-  // Reading bad ECAL module channels
-  std::vector<std::pair<double, double>> xyBADchan = ReadXYPosBADChan("maps/bad_ecal_channels_04_08_25.csv");
-  bool cut_on_nearBADchan, isNearBadChan = false;
-  Double_t r_max, r2_max;
   
   // Reading config file
   ifstream configfile(configfilename);
@@ -144,6 +138,9 @@ void elas_calib(char const *configfilename,
       if( skey == "macros_dir" ){
 	macros_dir = ((TObjString*)(*tokens)[1])->GetString();
       }
+      if( skey == "badchan_file" ){
+	badchan_file = ((TObjString*)(*tokens)[1])->GetString();
+      }      
       if( skey == "E_beam" ){
 	E_beam = ((TObjString*)(*tokens)[1])->GetString().Atof();
       }
@@ -239,7 +236,22 @@ void elas_calib(char const *configfilename,
       }
     } 
     delete tokens;
-  }  
+  }
+
+  // ------------------------
+  // Reading Various Maps
+  // ------------------------
+  // Reading the master map of ECAL
+  LookUpTableReader CSVreader;
+  CSVreader.readCSV("maps/ECAL_r_c_x_y_cpr.csv");  
+  // Reading module IDs of ECAL blocks at the edge
+  std::unordered_set<int> edgeECALblks = ReadNumFromTextFileToUOS("maps/edge_blocks_ecal.txt");
+  bool isECALedge = false;
+  // Reading bad ECAL module channels
+  std::vector<int> BADchanIDs = ReadNumFromTextFileToV(badchan_file.Data());
+  std::vector<std::pair<double, double>> xyBADchan = GetXYPosBADChan(CSVreader,BADchanIDs,isdebug); 
+  bool isNearBadChan = false;
+  // ---  
 
   // Turning on relevant tree branches
   int maxNtr = 200; //max # of tracks expected per event
@@ -1124,6 +1136,7 @@ void elas_calib(char const *configfilename,
   TPaveText *pt = new TPaveText(.05,.1,.95,.8);
   pt->AddText(Form(" Date of creation: %s",GetDate().c_str()));
   pt->AddText(Form("Configfile: ECAL_replay/scripts/cfg/%s.cfg",cfgfilebase.Data()));
+  pt->AddText(Form("BAD Chan ID File: ECAL_replay/scripts/%s.cfg",badchan_file.Data()));  
   pt->AddText(Form(" Total # events analyzed: %lld ",Nevents));
   pt->AddText(Form(" E/p (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
   pt->AddText(Form(" E/p (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
@@ -1275,34 +1288,18 @@ std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename) {
 }
 
 // Read the x,y positions of the known BAD channels
-std::vector<std::pair<double, double>> ReadXYPosBADChan(const std::string& filename) {
+std::vector<std::pair<double, double>> GetXYPosBADChan(LookUpTableReader& ecalmap,
+						       std::vector<int>& badchanlist, bool isdebug) {
   std::vector<std::pair<double, double>> positions;
-  std::ifstream file(filename);
-    
-  if (!file.is_open()) {
-    throw std::runtime_error("Could not open file: " + filename);
-  }
-
-  std::string line;
-    
-  // Skip the header
-  std::getline(file, line);
-
-  while (std::getline(file, line)) {
-    std::stringstream ss(line);
-    std::string token;
-    int col = 0;
-    double xpos = 0.0, ypos = 0.0;
-
-    while (std::getline(ss, token, ',')) {
-      if (col == 1) xpos = std::stod(token);
-      else if (col == 2) ypos = std::stod(token);
-      col++;
-    }
-
+  for (int chan : badchanlist) {
+    double xpos = ecalmap.GetValueByKey(chan,2);
+    double ypos = ecalmap.GetValueByKey(chan,3);
     positions.emplace_back(xpos, ypos);
-  }
 
+    if (isdebug) {
+      std::cout << Form("BAD Chan ID %d, xpos %f, ypos %f\n",chan,xpos,ypos);
+    }    
+  }
   return positions;
 }
 
