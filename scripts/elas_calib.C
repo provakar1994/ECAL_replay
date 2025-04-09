@@ -41,16 +41,17 @@ const int kNcols = 27; // varies by row. 27 is the maxc.
 string GetDate();
 void CustmProfHisto(TH1*);
 TString GetOutFileBase(TString);
-void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e);
 std::vector<int> ReadNumFromTextFileToV(const std::string &filename);
-std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename);
-std::vector<std::string> SplitString(char const delim, std::string const myStr);
-std::vector<std::pair<double, double>> GetXYPosBADChan(LookUpTableReader&,std::vector<int>&,bool);
+void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e);
+std::vector<std::string> SplitString(char const delim, std::string const str);
+std::unordered_set<int> GetEdgeBlkID(LookUpTableReader& ecalmap, bool isdedug);
+std::unordered_map<int,int> GetNColPerRow(LookUpTableReader& ecalmap, bool isdebug);
+std::vector<std::pair<double, double>> GetXYPosBADChan(LookUpTableReader& ecalmap, std::vector<int>& badch, bool isdebug);
 bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, double xSEED, double ySEED, double r2_max, int debug);
   
 // Main function
 void elas_calib(char const *configfilename,
-		char const *prefix="",  //prefix to the output file names
+		std::string prefix="",  //prefix to the output file names
 		int isdebug=0)          //0=>False, >0=>True
 {
   gErrorIgnoreLevel = kError; // Ignores all ROOT warnings
@@ -82,6 +83,7 @@ void elas_calib(char const *configfilename,
   Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
   // analysis related
   bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0, cut_on_nearBADchan=0;
+  bool isECALedge=0, isNearBadChan=0;
   Double_t r_max, r2_max;
   Double_t W2_mean, W2_sigma, W2_nsigma;
   Double_t EovP_cut_limit, eECAL_cut_limit;
@@ -242,15 +244,15 @@ void elas_calib(char const *configfilename,
   // Reading Various Maps
   // ------------------------
   // Reading the master map of ECAL
-  LookUpTableReader CSVreader;
-  CSVreader.readCSV("maps/ECAL_r_c_x_y_cpr.csv");  
+  LookUpTableReader ECALmap;
+  ECALmap.readCSV("maps/ECAL_r_c_x_y_cpr_updated.csv");  
   // Reading module IDs of ECAL blocks at the edge
-  std::unordered_set<int> edgeECALblks = ReadNumFromTextFileToUOS("maps/edge_blocks_ecal.txt");
-  bool isECALedge = false;
+  std::unordered_set<int> edgeECALblks = GetEdgeBlkID(ECALmap,isdebug);
+  // Reading no. of columns per row
+  std::unordered_map<int,int> ncolprow = GetNColPerRow(ECALmap,isdebug);  
   // Reading bad ECAL module channels
   std::vector<int> BADchanIDs = ReadNumFromTextFileToV(badchan_file.Data());
-  std::vector<std::pair<double, double>> xyBADchan = GetXYPosBADChan(CSVreader,BADchanIDs,isdebug); 
-  bool isNearBadChan = false;
+  std::vector<std::pair<double, double>> xyBADchan = GetXYPosBADChan(ECALmap,BADchanIDs,isdebug); 
   // ---  
 
   // Turning on relevant tree branches
@@ -329,11 +331,11 @@ void elas_calib(char const *configfilename,
   
   // Creating output ROOT file to contain histograms
   TString outFile, outPlot, outGain, outGainR;
-  // char const * debug = isdebug ? "_test" : "";
-  outFile = Form("%s/hist/%s_%s.root",macros_dir.Data(),prefix,cfgfilebase.Data());
-  outPlot = Form("%s/plots/%s_%s.pdf",macros_dir.Data(),prefix,cfgfilebase.Data());
-  outGain = Form("%s/gain/%s_%s_gainCoeff.txt",macros_dir.Data(),prefix,cfgfilebase.Data());  
-  outGainR = Form("%s/gain/%s_%s_gainRatio.txt",macros_dir.Data(),prefix,cfgfilebase.Data());  
+  std::string prefix_str = prefix.empty() ? "" : prefix + "_";
+  outFile = Form("%s/hist/%s%s.root",macros_dir.Data(),prefix_str.c_str(),cfgfilebase.Data());
+  outPlot = Form("%s/plots/%s%s.pdf",macros_dir.Data(),prefix_str.c_str(),cfgfilebase.Data());
+  outGain = Form("%s/gain/%s%s_gainCoeff.txt",macros_dir.Data(),prefix_str.c_str(),cfgfilebase.Data());  
+  outGainR = Form("%s/gain/%s%s_gainRatio.txt",macros_dir.Data(),prefix_str.c_str(),cfgfilebase.Data());  
 
   //std::unique_ptr<TFile> fout( TFile::Open(outFile, "RECREATE") );
   TFile *fout = new TFile(outFile, "RECREATE");
@@ -675,11 +677,9 @@ void elas_calib(char const *configfilename,
   outGainR_data.open(outGainR);
   Double_t newADCgratio[kNblks];
   for (int i=0; i<kNblks; i++) { newADCgratio[i] = -1000; }  
-  std::vector<int> nColperRow = ReadNumFromTextFileToV("maps/ncol_per_row_ecal.txt");
   for (int irow=0; irow<kNrows; irow++) {
-    int colMax = nColperRow[irow];
-    for (int icol=0; icol<colMax; icol++) {
-      
+    int colMax = ncolprow[irow];
+    for (int icol=0; icol<colMax; icol++) {      
       Double_t oldCoeff = oldADCgain[iblk];
       Double_t gainRatio = CoeffR(iblk);
       if(!badCells[iblk]) {
@@ -1136,7 +1136,7 @@ void elas_calib(char const *configfilename,
   TPaveText *pt = new TPaveText(.05,.1,.95,.8);
   pt->AddText(Form(" Date of creation: %s",GetDate().c_str()));
   pt->AddText(Form("Configfile: ECAL_replay/scripts/cfg/%s.cfg",cfgfilebase.Data()));
-  pt->AddText(Form("BAD Chan ID File: ECAL_replay/scripts/%s.cfg",badchan_file.Data()));  
+  pt->AddText(Form("BAD Chan ID File: ECAL_replay/scripts/%s",badchan_file.Data()));  
   pt->AddText(Form(" Total # events analyzed: %lld ",Nevents));
   pt->AddText(Form(" E/p (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
   pt->AddText(Form(" E/p (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
@@ -1257,7 +1257,7 @@ void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e) {
   }
 }
 
-// Reads from a text file
+// Reads from a single column text file (no header)
 std::vector<int> ReadNumFromTextFileToV(const std::string &filename) {
   std::vector<int> numVec;
   std::ifstream file(filename);
@@ -1273,18 +1273,39 @@ std::vector<int> ReadNumFromTextFileToV(const std::string &filename) {
 }
 
 // Reads from a text file
-std::unordered_set<int> ReadNumFromTextFileToUOS(const std::string &filename) {
-  std::unordered_set<int> numSet;
-  std::ifstream file(filename);
-  int num;
-  // Check if the file was successfully opened
-  if (!file) {
-    throw std::runtime_error("Error: Unable to open file " + filename);
+std::unordered_set<int> GetEdgeBlkID(LookUpTableReader& ecalmap, bool isdebug) {
+  std::unordered_set<int> edgeblkid;
+  for (int iblk=0; iblk<kNblks; iblk++) {
+    bool isonedge = int(ecalmap.GetValueByKey(iblk,5));
+    if (isonedge) {
+      edgeblkid.insert(iblk);
+      if (isdebug) {
+	std::cout << Form("Block ID on Edge: %d\n",iblk);
+      }  
+    }
   }
-  while (file >> num) {
-    numSet.insert(num);
+  return edgeblkid;
+}
+
+// Extracts # of Columns per Row from the ECAL map
+std::unordered_map<int,int> GetNColPerRow(LookUpTableReader& ecalmap, bool isdebug) {
+  std::unordered_map<int,int> ncolprow;
+  for (int iblk=0; iblk<kNblks; iblk++) {
+    int row = int(ecalmap.GetValueByKey(iblk,0));
+    int ncol = int(ecalmap.GetValueByKey(iblk,4));    
+    ncolprow[row] = ncol;
   }
-  return numSet;
+  if (isdebug) {
+    std::vector<int> keys;
+    for (const auto& pair : ncolprow) {
+        keys.push_back(pair.first);
+    }
+    std::sort(keys.begin(), keys.end());
+    for (int key : keys) {
+      std::cout << Form("Row %d has %d Columns\n",key,ncolprow[key]);
+    }    
+  }  
+  return ncolprow;  
 }
 
 // Read the x,y positions of the known BAD channels
