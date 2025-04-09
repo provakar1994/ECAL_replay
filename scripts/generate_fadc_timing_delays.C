@@ -7,7 +7,7 @@
 using namespace std;
 
 
-void generate_fadc_timing_delays(){
+void generate_fadc_timing_delays(int runis){
 
   int add_time_arr[1656];
   int arr_index1 = 0;
@@ -171,8 +171,12 @@ void generate_fadc_timing_delays(){
   vector<int> delay_diff;
 
   int ch_index = 0;
+
+  TString time_outliers_file;
+
+  time_outliers_file = Form("time_outliers_%i.txt", runis);
   
-  ifstream time_outlier("time_outliers.txt");
+  ifstream time_outlier(time_outliers_file);
   TString time_currentline;
 
   while( time_currentline.ReadLine(time_outlier) ){
