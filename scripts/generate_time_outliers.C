@@ -583,7 +583,7 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
 
 }
 	//Time fit
-        if(time_pmt_is[n]->GetEntries()>1){ 
+        if(time_pmt_is[n]->GetEntries()>=0){ 
 
 	// Create fit functions for each module
 	fgaus2->SetLineColor(2);
@@ -615,7 +615,7 @@ void generate_time_outliers(int runis, int mid_multiplicity = 1, int col_start =
 
 	time_pmt_is[n]->Fit( fgaus2,"+RQ" );//kip
 	time_mean[n] = fgaus2->GetParameter(1);
-	cout << n << " " << fgaus2->GetParameter(0) << " " << fgaus2->GetParameter(1) << endl;
+	//cout << n << " " << fgaus2->GetParameter(0) << " " << fgaus2->GetParameter(1) << endl;
 	fgaus2->GetParameters(Parstime);
 
 	time_outlier_list[n] = 195 - time_mean[n];

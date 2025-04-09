@@ -202,7 +202,12 @@ void generate_fadc_timing_delays(int runis){
   for(int i = 0; i < 1656; i++){
     for(int j = 0; j < new_delay.size(); j++){
       if(i == new_delay[j]){
-	ecal_delay_cnf[i] = 99999;
+	//ecal_delay_cnf[i] = 99999;
+	if(delay_entries[j] >= 100){
+	  ecal_delay_cnf[i] = ecal_delay_cnf[i] + delay_diff[j];
+	}else{
+	  ecal_delay_cnf[i] = ecal_delay_cnf[i+1];
+	}
       }
     }
   }
