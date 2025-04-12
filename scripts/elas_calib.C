@@ -245,7 +245,7 @@ void elas_calib(char const *configfilename,
   // ------------------------
   // Reading the master map of ECAL
   LookUpTableReader ECALmap;
-  ECALmap.readCSV("maps/ECAL_r_c_x_y_cpr_updated.csv");  
+  ECALmap.readCSV("maps/ECAL_r_c_x_y_cpr.csv");  
   // Reading module IDs of ECAL blocks at the edge
   std::unordered_set<int> edgeECALblks = GetEdgeBlkID(ECALmap,isdebug);
   // Reading no. of columns per row
