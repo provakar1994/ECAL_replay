@@ -33,9 +33,9 @@
 Double_t const Mp = 0.938272081;  // +/- 6E-9 GeV
 
 // ECAL geometry
-const int kNblks = 1656;
-const int kNrows = 69;
-const int kNcols = 27; // varies by row. 27 is the maxc.
+const int kNblks = 288;
+const int kNrows = 24;
+const int kNcols = 12; 
 
 // Utility functions
 string GetDate();
@@ -50,7 +50,7 @@ std::vector<std::pair<double, double>> GetXYPosBADChan(LookUpTableReader& ecalma
 bool ISNearBADChan(std::vector<std::pair<double, double>> const &xyBADchan, double xSEED, double ySEED, double r2_max, int debug);
   
 // Main function
-void elas_calib(char const *configfilename,
+void hcal_elas_calib(char const *configfilename,
 		std::string prefix="",  //prefix to the output file names
 		int isdebug=0)          //0=>False, >0=>True
 {
@@ -70,27 +70,28 @@ void elas_calib(char const *configfilename,
   TString macros_dir, badchan_file;
   Int_t Nmin=10;
   Double_t minMBratio=0.1;  
-  // ECAL related
+  // HCAL related
   Double_t ECAL_dist=8.0; //m
   Double_t ECAL_voff=0., ECAL_hoff=0., ECAL_zoff=0.; //m
   // histogram related
   Double_t h_W2_bin=200, h_W2_min=0., h_W2_max=5.;
   Double_t h_Q2_bin=200, h_Q2_min=0., h_Q2_max=5.;  
-  Double_t h_eECAL_bin=200, h_eECAL_min=0., h_eECAL_max=5.;
-  Double_t h_EovP_bin=200, h_EovP_min=0., h_EovP_max=5., EovP_fit_width=1.5;
-  Double_t h2_EovP_bin=200, h2_EovP_min=0., h2_EovP_max=5.;
+  Double_t h_eHCAL_bin=200, h_eHCAL_min=0., h_eHCAL_max=5.;
+  Double_t h_EovEexp_bin=200, h_EovEexp_min=0., h_EovEexp_max=5., EovEexp_fit_width=1.5;
+  Double_t h2_EovEexp_bin=200, h2_EovEexp_min=0., h2_EovEexp_max=5.;
+  Double_t h_eSF_bin=200, h_eSF_min=0., h_eSF_max=0.45, eSF_fit_width=1.;  
   Double_t h2_p_bin = 200, h2_p_min = 0., h2_p_max = 5.;  
   Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
   // analysis related
-  bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0, cut_on_nearBADchan=0;
-  bool isECALedge=0, isNearBadChan=0;
+  bool cut_on_W2=0, cut_on_EovEexp=0, cut_on_eHCAL=0, cut_on_nearBADchan=0;
+  bool isHCALedge=0, isNearBadChan=0;
   Double_t r_max, r2_max;
   Double_t W2_mean, W2_sigma, W2_nsigma;
-  Double_t EovP_cut_limit, eECAL_cut_limit;
+  Double_t EovEexp_cut_limit, eHCAL_cut_limit;
   Double_t hit_threshold=0., engFrac_cut=0., tmax_cut=1000.;    
   // kinematic related
   Double_t E_beam, th_bb;
-  Double_t p_p, p_px, p_py, p_pz, th_p, ph_p, E_p, p_p_offset; 
+  Double_t p_p, p_px, p_py, p_pz, th_p, ph_p, E_p, KE_p, KE_p_frac, p_p_offset; 
   Double_t th_e, ph_e;
   Double_t nu, Q2, W2, dx, dy;
   Double_t nu_4vec, Q2_4vec, W2_4vec, dx_4vec, dy_4vec;  
@@ -99,8 +100,9 @@ void elas_calib(char const *configfilename,
   Double_t p_e_th;   // calculated using recontructed angles
   Double_t p_e_CURR; // this variable will be used for calibration
   // analysis related
-  int recon_type=0;  // 1=> use p_e. Otherwise, p_e_th is used  
-  bool enable_4vec=true;
+  int recon_type=1;  // 1=> use p_e. Otherwise, p_e_th is used  
+  // bool enable_4vec=false;
+  Double_t HCAL_sf=0.07; // HCAL sampling fraction
   
   TMatrixD M(kNblks,kNblks), M_inv(kNblks,kNblks);
   TVectorD B(kNblks), CoeffR(kNblks);  
@@ -178,13 +180,13 @@ void elas_calib(char const *configfilename,
       if( skey == "Min_MB_Ratio" ){
 	minMBratio = ((TObjString*)(*tokens)[1])->GetString().Atoi();
       }
-      if( skey == "eECAL_cut" ){
-	cut_on_eECAL = ((TObjString*)(*tokens)[1])->GetString().Atoi();
-	eECAL_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
+      if( skey == "eHCAL_cut" ){
+	cut_on_eHCAL = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	eHCAL_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
       }      
-      if( skey == "EovP_cut" ){
-	cut_on_EovP = ((TObjString*)(*tokens)[1])->GetString().Atoi();
-	EovP_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
+      if( skey == "EovEexp_cut" ){
+	cut_on_EovEexp = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	EovEexp_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
       }
       if( skey == "W2_cut" ){
 	cut_on_W2 = ((TObjString*)(*tokens)[1])->GetString().Atoi();
@@ -202,18 +204,18 @@ void elas_calib(char const *configfilename,
 	h_Q2_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
 	h_Q2_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
       }
-      if( skey == "h_EovP" ){
-	h_EovP_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
-	h_EovP_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
-	h_EovP_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      if( skey == "h_EovEexp" ){
+	h_EovEexp_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_EovEexp_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_EovEexp_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
       }
-      if( skey == "EovP_fit_width" ){
-	EovP_fit_width = ((TObjString*)(*tokens)[1])->GetString().Atof();
+      if( skey == "EovEexp_fit_width" ){
+	EovEexp_fit_width = ((TObjString*)(*tokens)[1])->GetString().Atof();
       }
-      if( skey == "h_eECAL" ){
-	h_eECAL_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
-	h_eECAL_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
-	h_eECAL_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      if( skey == "h_eHCAL" ){
+	h_eHCAL_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h_eHCAL_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h_eHCAL_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
       }
       if( skey == "h2_p" ){
 	h2_p_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
@@ -225,10 +227,10 @@ void elas_calib(char const *configfilename,
 	h2_p_coarse_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
 	h2_p_coarse_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
       }
-      if( skey == "h2_EovP" ){
-	h2_EovP_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
-	h2_EovP_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
-	h2_EovP_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      if( skey == "h2_EovEexp" ){
+	h2_EovEexp_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
+	h2_EovEexp_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	h2_EovEexp_max = ((TObjString*)(*tokens)[3])->GetString().Atof();
       }
       if( skey == "p_p_Offset" ){
 	p_p_offset = ((TObjString*)(*tokens)[1])->GetString().Atof();
@@ -240,48 +242,51 @@ void elas_calib(char const *configfilename,
     delete tokens;
   }
 
-  // ------------------------
-  // Reading Various Maps
-  // ------------------------
-  // Reading the master map of ECAL
-  LookUpTableReader ECALmap;
-  ECALmap.readCSV("maps/ECAL_r_c_x_y_cpr.csv");  
-  // Reading module IDs of ECAL blocks at the edge
-  std::unordered_set<int> edgeECALblks = GetEdgeBlkID(ECALmap,isdebug);
-  // Reading no. of columns per row
-  std::unordered_map<int,int> ncolprow = GetNColPerRow(ECALmap,isdebug);  
-  // Reading bad ECAL module channels
-  std::vector<int> BADchanIDs = ReadNumFromTextFileToV(badchan_file.Data());
-  std::vector<std::pair<double, double>> xyBADchan = GetXYPosBADChan(ECALmap,BADchanIDs,isdebug); 
-  // ---  
+  // // ------------------------
+  // // Reading Various Maps
+  // // ------------------------
+  // // Reading the master map of HCAL
+  // LookUpTableReader HCALmap;
+  // HCALmap.readCSV("maps/HCAL_r_c_x_y_cpr.csv");  
+  // // Reading module IDs of HCAL blocks at the edge
+  // std::unordered_set<int> edgeHCALblks = GetEdgeBlkID(HCALmap,isdebug);
+  // // Reading no. of columns per row
+  // std::unordered_map<int,int> ncolprow = GetNColPerRow(HCALmap,isdebug);  
+  // // Reading bad HCAL module channels
+  // std::vector<int> BADchanIDs = ReadNumFromTextFileToV(badchan_file.Data());
+  // std::vector<std::pair<double, double>> xyBADchan = GetXYPosBADChan(HCALmap,BADchanIDs,isdebug); 
+  // // ---  
 
   // Turning on relevant tree branches
   int maxNtr = 200; //max # of tracks expected per event
   C->SetBranchStatus("*", 0);
-  // earm.ecal branches
-  C->SetBranchStatus("earm.ecal.*", 1);
-  Double_t nclusECAL;              C->SetBranchAddress("earm.ecal.nclus", &nclusECAL);
-  Double_t idblkECAL;              C->SetBranchAddress("earm.ecal.idblk", &idblkECAL);
-  Double_t rowblkECAL;             C->SetBranchAddress("earm.ecal.rowblk", &rowblkECAL);
-  Double_t colblkECAL;             C->SetBranchAddress("earm.ecal.colblk", &colblkECAL);
-  Double_t nblkECAL;               C->SetBranchAddress("earm.ecal.nblk", &nblkECAL);
-  Double_t atimeECAL;              C->SetBranchAddress("earm.ecal.atimeblk", &atimeECAL);
-  Double_t eECAL;                  C->SetBranchAddress("earm.ecal.e", &eECAL);
-  Double_t xECAL;                  C->SetBranchAddress("earm.ecal.x", &xECAL);
-  Double_t yECAL;                  C->SetBranchAddress("earm.ecal.y", &yECAL);
-  Double_t idclblkECAL[maxNtr];    C->SetBranchAddress("earm.ecal.clus_blk.id", &idclblkECAL);
-  Double_t eclblkECAL[maxNtr];     C->SetBranchAddress("earm.ecal.clus_blk.e", &eclblkECAL);
-  Double_t xclblkECAL[maxNtr];     C->SetBranchAddress("earm.ecal.clus_blk.x", &xclblkECAL);
-  Double_t yclblkECAL[maxNtr];     C->SetBranchAddress("earm.ecal.clus_blk.y", &yclblkECAL);
-  Double_t rowclblkECAL[maxNtr];   C->SetBranchAddress("earm.ecal.clus_blk.row", &rowclblkECAL);
-  Double_t colclblkECAL[maxNtr];   C->SetBranchAddress("earm.ecal.clus_blk.col", &colclblkECAL);
-  Double_t atimeclblkECAL[maxNtr]; C->SetBranchAddress("earm.ecal.clus_blk.atime", &atimeclblkECAL);
-  Double_t againblkECAL;           C->SetBranchAddress("earm.ecal.againblk", &againblkECAL);  
   // sbs.hcal branches
-  Double_t eHCAL;                C->SetBranchStatus("sbs.hcal.e",1); C->SetBranchAddress("sbs.hcal.e", &eHCAL);
-  Double_t xHCAL;                C->SetBranchStatus("sbs.hcal.x",1); C->SetBranchAddress("sbs.hcal.x", &xHCAL);
-  Double_t yHCAL;                C->SetBranchStatus("sbs.hcal.y",1); C->SetBranchAddress("sbs.hcal.y", &yHCAL); 
-  Double_t atimeHCAL;            C->SetBranchStatus("sbs.hcal.atimeblk",1);   C->SetBranchAddress("sbs.hcal.atimeblk", &atimeHCAL); 
+  C->SetBranchStatus("sbs.hcal.*", 1);
+  Double_t nclusHCAL;              C->SetBranchAddress("sbs.hcal.nclus", &nclusHCAL);
+  Double_t idblkHCAL;              C->SetBranchAddress("sbs.hcal.idblk", &idblkHCAL);
+  Double_t rowblkHCAL;             C->SetBranchAddress("sbs.hcal.rowblk", &rowblkHCAL);
+  Double_t colblkHCAL;             C->SetBranchAddress("sbs.hcal.colblk", &colblkHCAL);
+  Double_t nblkHCAL;               C->SetBranchAddress("sbs.hcal.nblk", &nblkHCAL);
+  Double_t atimeHCAL;              C->SetBranchAddress("sbs.hcal.atimeblk", &atimeHCAL);
+  Double_t eHCAL;                  C->SetBranchAddress("sbs.hcal.e", &eHCAL);
+  Double_t xHCAL;                  C->SetBranchAddress("sbs.hcal.x", &xHCAL);
+  Double_t yHCAL;                  C->SetBranchAddress("sbs.hcal.y", &yHCAL);
+  Double_t idclblkHCAL[maxNtr];    C->SetBranchAddress("sbs.hcal.clus_blk.id", &idclblkHCAL);
+  Double_t eclblkHCAL[maxNtr];     C->SetBranchAddress("sbs.hcal.clus_blk.e", &eclblkHCAL);
+  Double_t xclblkHCAL[maxNtr];     C->SetBranchAddress("sbs.hcal.clus_blk.x", &xclblkHCAL);
+  Double_t yclblkHCAL[maxNtr];     C->SetBranchAddress("sbs.hcal.clus_blk.y", &yclblkHCAL);
+  Double_t rowclblkHCAL[maxNtr];   C->SetBranchAddress("sbs.hcal.clus_blk.row", &rowclblkHCAL);
+  Double_t colclblkHCAL[maxNtr];   C->SetBranchAddress("sbs.hcal.clus_blk.col", &colclblkHCAL);
+  Double_t atimeclblkHCAL[maxNtr]; C->SetBranchAddress("sbs.hcal.clus_blk.atime", &atimeclblkHCAL);
+  Double_t againblkHCAL;           C->SetBranchAddress("sbs.hcal.againblk", &againblkHCAL);  
+  // earm.ecal branches
+  Double_t eECAL;                C->SetBranchStatus("earm.ecal.e",1); C->SetBranchAddress("earm.ecal.e", &eECAL);
+  Double_t xECAL;                C->SetBranchStatus("earm.ecal.x",1); C->SetBranchAddress("earm.ecal.x", &xECAL);
+  Double_t yECAL;                C->SetBranchStatus("earm.ecal.y",1); C->SetBranchAddress("earm.ecal.y", &yECAL);
+  Double_t idblkECAL;            C->SetBranchStatus("earm.ecal.idblk",1); C->SetBranchAddress("earm.ecal.idblk", &idblkECAL);  
+  Double_t rowblkECAL;           C->SetBranchStatus("earm.ecal.rowblk",1); C->SetBranchAddress("earm.ecal.rowblk", &rowblkECAL);
+  Double_t colblkECAL;           C->SetBranchStatus("earm.ecal.colblk",1); C->SetBranchAddress("earm.ecal.colblk", &colblkECAL);     
+  Double_t atimeECAL;            C->SetBranchStatus("earm.ecal.atimeblk",1);   C->SetBranchAddress("earm.ecal.atimeblk", &atimeECAL); 
   // sbs.tr branches
   C->SetBranchStatus("sbs.tr.*", 1);
   Double_t trN;                  C->SetBranchAddress("sbs.tr.n", &trN);
@@ -308,29 +313,16 @@ void elas_calib(char const *configfilename,
   Double_t heep_eth_pth;         C->SetBranchAddress("heep.eth_pth", &heep_eth_pth);  
   Double_t heep_dpp;             C->SetBranchAddress("heep.dpp", &heep_dpp);  
   Double_t heep_dxECAL;          C->SetBranchAddress("heep.dxECAL", &heep_dxECAL);
-  Double_t heep_dyECAL;          C->SetBranchAddress("heep.dyECAL", &heep_dyECAL);    
+  Double_t heep_dyECAL;          C->SetBranchAddress("heep.dyECAL", &heep_dyECAL);  
   // Event info
-  // C->SetMakeClass(1);
+  C->SetMakeClass(1);
   // C->SetBranchStatus("fEvtHdr.*", 1);
   // UInt_t rnum;                   C->SetBranchAddress("fEvtHdr.fRun", &rnum);
   // UInt_t trigbits;               C->SetBranchAddress("fEvtHdr.fTrigBits", &trigbits);
   // ULong64_t gevnum;              C->SetBranchAddress("fEvtHdr.fEvtNum", &gevnum);
   // turning on additional branches for the global cut
-  //C->SetBranchStatus("sbs.gemFPP.*", 0);
-  C->SetBranchStatus("sbs.gemFT.*", 1);  
-  C->SetBranchStatus("sbs.x*", 1);
-  C->SetBranchStatus("sbs.y*", 1);
-  C->SetBranchStatus("sbs.z*", 1);
-  // Double_t sbs_x_bcp[maxNtr];        C->SetBranchAddress("sbs.x_bcp", &sbs_x_bcp);
-  // Double_t sbs_y_bcp[maxNtr];        C->SetBranchAddress("sbs.y_bcp", &sbs_y_bcp);
-  // Double_t sbs_z_bcp[maxNtr];        C->SetBranchAddress("sbs.z_bcp", &sbs_z_bcp);
-
-  // //added by Kip in order to test more strict elastic cuts reccomended by Andrew
-  // C->SetBranchStatus("sbs.x_bcp", 1);
-  // C->SetBranchStatus("sbs.y_bcp", 1);
-  // C->SetBranchStatus("sbs.z_bcp", 1); 
-  
-  // C->SetBranchStatus("sbs.gem.track.nhits", 1);
+  //C->SetBranchStatus("sbs.gemFPP.*", 1);
+  //  C->SetBranchStatus("heep.*", 1);
   // C->SetBranchStatus("sbs.gem.track.ngoodhits", 1);
   // C->SetBranchStatus("sbs.gem.track.chi2ndf", 1);
 
@@ -345,11 +337,11 @@ void elas_calib(char const *configfilename,
   for (int i=0; i<kNblks; i++) { oldADCgain[i] = -1000; }    
 
   gStyle->SetOptStat(0);
-  TH2D *h2_eECAL_vs_blk_raw = new TH2D("h2_eECAL_vs_blk_raw","Raw E_clus per block",kNcols,0,kNcols,kNrows,0,kNrows);
-  TH2D *h2_EovP_vs_blk_raw = new TH2D("h2_EovP_vs_blk_raw","Raw E/p per block",kNcols,0,kNcols,kNrows,0,kNrows);
-  TH2D *h2_EovP_vs_blk_raw_calib = new TH2D("h2_EovP_vs_blk_raw_calib","Raw E/p per block (Calibrated)",kNcols,0,kNcols,kNrows,0,kNrows);
-  TH2D *h2_count = new TH2D("h2_count","Count for E/p per block",kNcols,0,kNcols,kNrows,0,kNrows);
-  TH2D *h2_count_calib = new TH2D("h2_count_calib","Count for E/p per block",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_eHCAL_vs_blk_raw = new TH2D("h2_eHCAL_vs_blk_raw","Raw E_clus per block",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_EovEexp_vs_blk_raw = new TH2D("h2_EovEexp_vs_blk_raw","Raw E/Eexp per block",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_EovEexp_vs_blk_raw_calib = new TH2D("h2_EovEexp_vs_blk_raw_calib","Raw E/Eexp per block (Calibrated)",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_count = new TH2D("h2_count","Count for E/Eexp per block",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_count_calib = new TH2D("h2_count_calib","Count for E/Eexp per block",kNcols,0,kNcols,kNrows,0,kNrows);
   
   // Creating output ROOT file to contain histograms
   TString outFile, outPlot, outGain, outGainR;
@@ -363,49 +355,45 @@ void elas_calib(char const *configfilename,
   TFile *fout = new TFile(outFile, "RECREATE");
   fout->cd();
    
-  TH1D *h_eECAL = new TH1D("h_eECAL","Best ECAL Clus. Eng. | Before",h_eECAL_bin,h_eECAL_min,h_eECAL_max);
-  TH1D *h_eECAL_calib = new TH1D("h_eECAL_calib","Best ECAL Clus. Eng. | After",h_eECAL_bin,h_eECAL_min,h_eECAL_max);
-  TH1D *h_EovP = new TH1D("h_EovP","E/p (Before)",h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH1D *h_EovP_calib = new TH1D("h_EovP_calib","E/p (After)",h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH1D *h_xECAL_diff = new TH1D("h_xECAL_diff","Vertical Pos. Diff. | Before; xECAL - xECAL_exp (m)",200,-0.5,0.5);
-  TH1D *h_xECAL_diff_calib = new TH1D("h_xECAL_diff_calib","Vertical Pos. Diff. | After; xECAL - xECAL_exp (m)",200,-0.5,0.5);
-  TH1D *h_yECAL_diff = new TH1D("h_yECAL_diff","Horizontal Pos. Diff. | Before; yECAL - yECAL_exp (m)",200,-0.5,0.5);
-  TH1D *h_yECAL_diff_calib = new TH1D("h_yECAL_diff_calib","Horizontal Pos. Diff. | After; yECAL - yECAL_exp (m)",200,-0.5,0.5);
+  TH1D *h_eHCAL = new TH1D("h_eHCAL","Best HCAL Clus. Eng. | Before",h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);
+  TH1D *h_eHCAL_calib = new TH1D("h_eHCAL_calib","Best HCAL Clus. Eng. | After",h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);
+  TH1D *h_EovEexp = new TH1D("h_EovEexp","E/E_exp (Before)",h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH1D *h_EovEexp_calib = new TH1D("h_EovEexp_calib","E/E_exp (After)",h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH1D *h_eSF = new TH1D("h_eSF","Energy Sampling Fraction (Before)",h_eSF_bin,h_eSF_min,h_eSF_max);
+  TH1D *h_eSF_calib = new TH1D("h_eSF_calib","Energy Sampling Fraction (After)",h_eSF_bin,h_eSF_min,h_eSF_max);  
+  TH1D *h_xHCAL_diff = new TH1D("h_xHCAL_diff","Vertical Pos. Diff. | Before; xHCAL - xHCAL_exp (m)",200,-0.5,0.5);
+  TH1D *h_xHCAL_diff_calib = new TH1D("h_xHCAL_diff_calib","Vertical Pos. Diff. | After; xHCAL - xHCAL_exp (m)",200,-0.5,0.5);
+  TH1D *h_yHCAL_diff = new TH1D("h_yHCAL_diff","Horizontal Pos. Diff. | Before; yHCAL - yHCAL_exp (m)",200,-0.5,0.5);
+  TH1D *h_yHCAL_diff_calib = new TH1D("h_yHCAL_diff_calib","Horizontal Pos. Diff. | After; yHCAL - yHCAL_exp (m)",200,-0.5,0.5);
   
-  TH2D *h2_EovP_vs_P = new TH2D("h2_EovP_vs_P","E/p vs p | Before; p (GeV); E/p",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h2_EovP_bin,h2_EovP_min,h2_EovP_max);
-  TProfile *h2_EovP_vs_P_prof = new TProfile("h2_EovP_vs_P_prof","E/p vs P (Profile) Before",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h_EovP_min,h_EovP_max,"S");
-  CustmProfHisto(h2_EovP_vs_P_prof);
-  TH2D *h2_EovP_vs_P_calib = new TH2D("h2_EovP_vs_P_calib","E/p vs p | After; p (GeV); E/p",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h2_EovP_bin,h2_EovP_min,h2_EovP_max);
-  TProfile *h2_EovP_vs_P_prof_calib = new TProfile("h2_EovP_vs_P_prof_calib","E/p vs P (Profile) After",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h_EovP_min,h_EovP_max,"S");
-  CustmProfHisto(h2_EovP_vs_P_prof_calib);
+  TH2D *h2_EovEexp_vs_P = new TH2D("h2_EovEexp_vs_P","E/Eexp vs p | Before; p (GeV); E/Eexp",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h2_EovEexp_bin,h2_EovEexp_min,h2_EovEexp_max);
+  TProfile *h2_EovEexp_vs_P_prof = new TProfile("h2_EovEexp_vs_P_prof","E/Eexp vs P (Profile) Before",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h_EovEexp_min,h_EovEexp_max,"S");
+  CustmProfHisto(h2_EovEexp_vs_P_prof);
+  TH2D *h2_EovEexp_vs_P_calib = new TH2D("h2_EovEexp_vs_P_calib","E/Eexp vs p | After; p (GeV); E/Eexp",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h2_EovEexp_bin,h2_EovEexp_min,h2_EovEexp_max);
+  TProfile *h2_EovEexp_vs_P_prof_calib = new TProfile("h2_EovEexp_vs_P_prof_calib","E/Eexp vs P (Profile) After",h2_p_coarse_bin,h2_p_coarse_min,h2_p_coarse_max,h_EovEexp_min,h_EovEexp_max,"S");
+  CustmProfHisto(h2_EovEexp_vs_P_prof_calib);
   
-  TH2D *h2_EovP_vs_blk = new TH2D("h2_EovP_vs_blk","E/p per block | Before",kNcols,0,kNcols,kNrows,0,kNrows);
-  TH2D *h2_EovP_vs_blk_calib = new TH2D("h2_EovP_vs_blk_calib","E/p per block | After",kNcols,0,kNcols,kNrows,0,kNrows);  
+  TH2D *h2_EovEexp_vs_blk = new TH2D("h2_EovEexp_vs_blk","E/Eexp per block | Before",kNcols,0,kNcols,kNrows,0,kNrows);
+  TH2D *h2_EovEexp_vs_blk_calib = new TH2D("h2_EovEexp_vs_blk_calib","E/Eexp per block | After",kNcols,0,kNcols,kNrows,0,kNrows);  
 
-  TH2D *h2_EovP_vs_xECALexp = new TH2D("h2_EovP_vs_xECALexp","E/p vs xECAL Expected | Before",200,-1.7,1.7,h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH2D *h2_EovP_vs_xECALexp_calib = new TH2D("h2_EovP_vs_xECALexp_calib","E/p vs xECAL Expected | After",200,-1.7,1.7,h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH2D *h2_EovP_vs_yECALexp = new TH2D("h2_EovP_vs_yECALexp","E/p vs yECAL Expected | Before",200,-0.8,0.8,h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH2D *h2_EovP_vs_yECALexp_calib = new TH2D("h2_EovP_vs_yECALexp_calib","E/p vs yECAL Expected | After",200,-0.8,0.8,h_EovP_bin,h_EovP_min,h_EovP_max);
-  TH2D *h2_eECAL_vs_xECALexp = new TH2D("h2_eECAL_vs_xECALexp","ECAL energy vs xECAL Expected | Before",200,-1.7,1.7,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
-  TH2D *h2_eECAL_vs_xECALexp_calib = new TH2D("h2_eECAL_vs_xECALexp_calib","ECAL energy vs xECAL Expected | After",200,-1.7,1.7,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
-  TH2D *h2_eECAL_vs_yECALexp = new TH2D("h2_eECAL_vs_yECALexp","ECAL energy vs yECAL Expected | Before",200,-0.8,0.8,h_eECAL_bin,h_eECAL_min,h_eECAL_max);
-  TH2D *h2_eECAL_vs_yECALexp_calib = new TH2D("h2_eECAL_vs_yECALexp_calib","ECAL energy vs yECAL Expected | After",200,-0.8,0.8,h_eECAL_bin,h_eECAL_min,h_eECAL_max);  
+  TH2D *h2_EovEexp_vs_xHCALexp = new TH2D("h2_EovEexp_vs_xHCALexp","E/Eexp vs xHCAL Expected | Before",200,-1.7,1.7,h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH2D *h2_EovEexp_vs_xHCALexp_calib = new TH2D("h2_EovEexp_vs_xHCALexp_calib","E/Eexp vs xHCAL Expected | After",200,-1.7,1.7,h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH2D *h2_EovEexp_vs_yHCALexp = new TH2D("h2_EovEexp_vs_yHCALexp","E/Eexp vs yHCAL Expected | Before",200,-0.8,0.8,h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH2D *h2_EovEexp_vs_yHCALexp_calib = new TH2D("h2_EovEexp_vs_yHCALexp_calib","E/Eexp vs yHCAL Expected | After",200,-0.8,0.8,h_EovEexp_bin,h_EovEexp_min,h_EovEexp_max);
+  TH2D *h2_eHCAL_vs_xHCALexp = new TH2D("h2_eHCAL_vs_xHCALexp","HCAL energy vs xHCAL Expected | Before",200,-1.7,1.7,h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);
+  TH2D *h2_eHCAL_vs_xHCALexp_calib = new TH2D("h2_eHCAL_vs_xHCALexp_calib","HCAL energy vs xHCAL Expected | After",200,-1.7,1.7,h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);
+  TH2D *h2_eHCAL_vs_yHCALexp = new TH2D("h2_eHCAL_vs_yHCALexp","HCAL energy vs yHCAL Expected | Before",200,-0.8,0.8,h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);
+  TH2D *h2_eHCAL_vs_yHCALexp_calib = new TH2D("h2_eHCAL_vs_yHCALexp_calib","HCAL energy vs yHCAL Expected | After",200,-0.8,0.8,h_eHCAL_bin,h_eHCAL_min,h_eHCAL_max);  
 
-  TH2D *h2_nev_per_blk = new TH2D("h2_nev_per_blk","Number of Good Events per Block;ECAL cols;ECAL rows",kNcols,0,kNcols,kNrows,0,kNrows);
-  // TH2D *h2_nev_per_blk_bot = new TH2D("h2_nev_per_blk_bot","# good ev per blk (Bottom Half);ECAL cols;ECAL rows",kNcols,0,kNcols,33,0,33);
-  // TH2D *h2_nev_per_blk_top = new TH2D("h2_nev_per_blk_top","# good ev per blk (Top Half);ECAL cols;ECAL rows",kNcols,0,kNcols,35,34,69);  
-
-  // individual cluster level histograms
-  TH1D *h_ECALcltdiff = new TH1D("h_ECALcltdiff","ECAL ADC time diff. bet. secondary blocks in cluster",200,-60,60);
-  TH1D *h_ECALcltdiff_calib = new TH1D("h_ECALcltdiff_calib","ECAL ADC time diff. bet. secondary blocks in cluster",200,-60,60);  
-  TH2D *h2_ECALtdiff_vs_engFrac = new TH2D("h2_ECALtdiff_vs_engFrac",";clus_blk.e/eblk;clus_blk.atime-atimeblk",200,0,1,200,-60,60);
-  TH2D *h2_ECALtdiff_vs_engFrac_calib = new TH2D("h2_ECALtdiff_vs_engFrac_calib",";clus_blk.e/eblk;clus_blk.atime-atimeblk",200,0,1,200,-60,60);
+  TH2D *h2_nev_per_blk = new TH2D("h2_nev_per_blk","Number of Good Events per Block;HCAL cols;HCAL rows",kNcols,0,kNcols,kNrows,0,kNrows);
+  // TH2D *h2_nev_per_blk_bot = new TH2D("h2_nev_per_blk_bot","# good ev per blk (Bottom Half);HCAL cols;HCAL rows",kNcols,0,kNcols,33,0,33);
+  // TH2D *h2_nev_per_blk_top = new TH2D("h2_nev_per_blk_top","# good ev per blk (Top Half);HCAL cols;HCAL rows",kNcols,0,kNcols,35,34,69);  
   
   // defining output ROOT tree (Set max size to 4GB)
   TTree *Tout = new TTree("Tout", cfgfilebase.Data()); 
   Tout->SetMaxTreeSize(4000000000LL);
   //
-  bool T_isECALedge;     Tout->Branch("isECALedge", &T_isECALedge, "isECALedge/O");
+  bool T_isHCALedge;     Tout->Branch("isHCALedge", &T_isHCALedge, "isHCALedge/O");
   bool T_isNearBadChan;  Tout->Branch("isNearBadChan", &T_isNearBadChan, "isNearBadChan/O");  
   //
   Double_t T_heep_dpp;    Tout->Branch("heep_dpp", &T_heep_dpp, "heep_dpp/D");
@@ -421,6 +409,8 @@ void elas_calib(char const *configfilename,
   Double_t T_p_py;       Tout->Branch("p_py", &T_p_py, "p_py/D");
   Double_t T_p_pz;       Tout->Branch("p_pz", &T_p_pz, "p_pz/D");  
   Double_t T_E_p;        Tout->Branch("E_p", &T_E_p, "E_p/D");
+  Double_t T_KE_p;       Tout->Branch("KE_p", &T_KE_p, "KE_p/D");
+  Double_t T_KE_p_frac;  Tout->Branch("KE_p_frac", &T_KE_p_frac, "KE_p_frac/D");    
   Double_t T_th_p;       Tout->Branch("th_p", &T_th_p, "th_p/D");
   Double_t T_ph_p;       Tout->Branch("ph_p", &T_ph_p, "ph_p/D");
   Double_t T_p_e;        Tout->Branch("p_e", &T_p_e, "p_e/D");
@@ -431,20 +421,25 @@ void elas_calib(char const *configfilename,
   Double_t T_nu;         Tout->Branch("nu", &T_nu, "nu/D"); 
   Double_t T_W2;         Tout->Branch("W2", &T_W2, "W2/D"); 
   Double_t T_Q2;         Tout->Branch("Q2", &T_Q2, "Q2/D");
-  Double_t T_dx;         Tout->Branch("dx", &T_dx, "dx/D");
-  Double_t T_dy;         Tout->Branch("dy", &T_dy, "dy/D");  
-  Double_t T_thpq;       Tout->Branch("thpq", &T_thpq, "thpq/D");  
+  Double_t T_dxECAL;     Tout->Branch("dxECAL", &T_dxECAL, "dxECAL/D");
+  Double_t T_dyECAL;     Tout->Branch("dyECAL", &T_dyECAL, "dyECAL/D");    
   Double_t T_xECAL_exp;  Tout->Branch("xECAL_exp", &T_xECAL_exp, "xECAL_exp/D"); 
   Double_t T_yECAL_exp;  Tout->Branch("yECAL_exp", &T_yECAL_exp, "yECAL_exp/D");
   //
-  Double_t T_nu_4vec;    if (enable_4vec) Tout->Branch("nu_4vec", &T_nu_4vec, "nu_4vec/D"); 
-  Double_t T_W2_4vec;    if (enable_4vec) Tout->Branch("W2_4vec", &T_W2_4vec, "W2_4vec/D"); 
-  Double_t T_Q2_4vec;    if (enable_4vec) Tout->Branch("Q2_4vec", &T_Q2_4vec, "Q2_4vec/D");
-  Double_t T_dx_4vec;    if (enable_4vec) Tout->Branch("dx_4vec", &T_dx_4vec, "dx_4vec/D");
-  Double_t T_dy_4vec;    if (enable_4vec) Tout->Branch("dy_4vec", &T_dy_4vec, "dy_4vec/D");  
-  Double_t T_thpq_4vec;  if (enable_4vec) Tout->Branch("thpq_4vec", &T_thpq_4vec, "thpq_4vec/D");    
-  Double_t T_xECAL_exp_4vec; if (enable_4vec) Tout->Branch("xECAL_exp_4vec", &T_xECAL_exp_4vec, "xECAL_exp_4vec/D"); 
-  Double_t T_yECAL_exp_4vec; if (enable_4vec) Tout->Branch("yECAL_exp_4vec", &T_yECAL_exp_4vec, "yECAL_exp_4vec/D");
+  // Double_t T_nu_4vec;    if (enable_4vec) Tout->Branch("nu_4vec", &T_nu_4vec, "nu_4vec/D"); 
+  // Double_t T_W2_4vec;    if (enable_4vec) Tout->Branch("W2_4vec", &T_W2_4vec, "W2_4vec/D"); 
+  // Double_t T_Q2_4vec;    if (enable_4vec) Tout->Branch("Q2_4vec", &T_Q2_4vec, "Q2_4vec/D");
+  // Double_t T_xECAL_exp_4vec; if (enable_4vec) Tout->Branch("xECAL_exp_4vec", &T_xECAL_exp_4vec, "xECAL_exp_4vec/D"); 
+  // Double_t T_yECAL_exp_4vec; if (enable_4vec) Tout->Branch("yECAL_exp_4vec", &T_yECAL_exp_4vec, "yECAL_exp_4vec/D");
+  // HCAL related
+  Double_t T_eHCAL;      Tout->Branch("eHCAL", &T_eHCAL, "eHCAL/D");
+  Double_t T_xHCAL;      Tout->Branch("xHCAL", &T_xHCAL, "xHCAL/D"); 
+  Double_t T_yHCAL;      Tout->Branch("yHCAL", &T_yHCAL, "yHCAL/D"); 
+  Double_t T_rowblkHCAL; Tout->Branch("rowblkHCAL", &T_rowblkHCAL, "rowblkHCAL/D"); 
+  Double_t T_colblkHCAL; Tout->Branch("colblkHCAL", &T_colblkHCAL, "colblkHCAL/D"); 
+  Double_t T_idblkHCAL;  Tout->Branch("idblkHCAL", &T_idblkHCAL, "idblkHCAL/D"); 
+  Double_t T_atimeHCAL;  Tout->Branch("atimeHCAL", &T_atimeHCAL, "atimeHCAL/D"); 
+  Double_t T_EovEexp;    Tout->Branch("EovEexp", &T_EovEexp, "EovEexp/D");
   // ECAL related
   Double_t T_eECAL;      Tout->Branch("eECAL", &T_eECAL, "eECAL/D"); 
   Double_t T_xECAL;      Tout->Branch("xECAL", &T_xECAL, "xECAL/D"); 
@@ -452,8 +447,7 @@ void elas_calib(char const *configfilename,
   Double_t T_rowblkECAL; Tout->Branch("rowblkECAL", &T_rowblkECAL, "rowblkECAL/D"); 
   Double_t T_colblkECAL; Tout->Branch("colblkECAL", &T_colblkECAL, "colblkECAL/D"); 
   Double_t T_idblkECAL;  Tout->Branch("idblkECAL", &T_idblkECAL, "idblkECAL/D"); 
-  Double_t T_atimeECAL;  Tout->Branch("atimeECAL", &T_atimeECAL, "atimeECAL/D"); 
-  Double_t T_EovP;       Tout->Branch("EovP", &T_EovP, "EovP/D");   
+  Double_t T_atimeECAL;  Tout->Branch("atimeECAL", &T_atimeECAL, "atimeECAL/D");   
   
   // calculating ECAL co-ordinates
   TVector3 ECAL_zaxis(sin(th_bb),0,cos(th_bb)); // use BB angle to calculate the center of Ecal
@@ -482,7 +476,7 @@ void elas_calib(char const *configfilename,
     // ------
 
     // get old gain coefficients (do it before applying global cut)
-    oldADCgain[int(idblkECAL)] = againblkECAL;
+    oldADCgain[int(idblkHCAL)-1] = againblkHCAL;
     
 
     // apply global cuts efficiently (AJRP method)
@@ -498,18 +492,12 @@ void elas_calib(char const *configfilename,
       // }
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
-    if (passedgCut) {      
+    if (passedgCut) {
       memset(A, 0, kNblks*sizeof(double));      
-      
-      // ECAL active area cut
-      isECALedge = edgeECALblks.count((int)idblkECAL);
-      if (isECALedge) continue;
 
-      // avoid events where seed is near known bad channels
-      if (cut_on_nearBADchan) {
-	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,isdebug);
-	if (isNearBadChan) continue;  // apply the cut
-      }
+      // HCAL active area cut
+      isHCALedge = rowblkHCAL == 0 || rowblkHCAL == 23 || colblkHCAL == 0 || colblkHCAL == 11; 
+      if (isHCALedge) continue;
 
       // keeping count of events passing globcal cuts
       Ngoodevs++;
@@ -517,14 +505,18 @@ void elas_calib(char const *configfilename,
       TVector3 vertex(0,0,trVz[0]);
       
       // scattered proton kinematics (reconstructed)
-      p_p = trP[0];
+      p_p = heep_pp_pth;  //trP[0]; // [04:16:25] Calculating based on angles until momentum is better calibrated.
       p_px = trPx[0];
       p_py = trPy[0];
       p_pz = trPz[0];    
       E_p = sqrt(p_p*p_p + Mp*Mp);
+      KE_p = E_p - Mp;
+      // Applying HCAL sampling fraction
+      KE_p_frac = KE_p*HCAL_sf; 
+	
       th_p = TMath::ACos(trPz[0]/trP[0]);
       ph_p = atan2(trPy[0],-trPx[0]); 
-
+      
       // scattered electron kinematics (from p kinematics)
       p_e = E_beam + Mp - E_p;
       th_e = 2.0 * TMath::ATan((Mp/(Mp+E_beam))*(1./TMath::Tan(th_p)));
@@ -545,62 +537,29 @@ void elas_calib(char const *configfilename,
       TVector3 ECAL_intersect = vertex + sintersect*Pefhat; 
       T_xECAL_exp = (ECAL_intersect - ECAL_origin).Dot(ECAL_xaxis);
       T_yECAL_exp = (ECAL_intersect - ECAL_origin).Dot(ECAL_yaxis);
-      T_dx = xECAL - T_xECAL_exp;
-      T_dy = yECAL - T_yECAL_exp;    
-
-      // Let's calculate the e- track based on ECAL cluster (Observed)
-      TVector3 ECAL_pos = ECAL_origin + xECAL*ECAL_xaxis + yECAL*ECAL_yaxis;
-      TVector3 Pefhat_obs = (ECAL_pos - vertex).Unit();
-      T_thpq = acos(Pefhat_obs.Dot(Pefhat));    
+      T_dxECAL = xECAL - T_xECAL_exp;
+      T_dyECAL = yECAL - T_yECAL_exp;    
       
-      if (enable_4vec) {
-	// elastic calculations (Using 4-vector method)
-	// Relevant 4-vectors
-	/* Reaction    : e + p -> e' + p'
-	   Conservation: Pei + Ppi = Pef + Ppf */
-	TLorentzVector Pei(0,0,E_beam,E_beam);  // incoming e- 4-vector
-	TLorentzVector Ppi(0,0,0,Mp);           // target nucleon 4-vector
-	TLorentzVector Ppf(p_px,                // Struck nucleon 4-vector
-			   p_py,
-			   p_pz,
-			   E_p);
-	TLorentzVector Pef = Pei + Ppi - Ppf;   // scattered e- 4-vector
-	//
-	TLorentzVector q = Ppf - Ppi;                // 4-momentum of virtual photon
-	nu_4vec = q.E();
-	Q2_4vec = -q.M2();
-	W2_4vec = Ppf.M2();
-	TVector3 Pefhat_4vec = Pef.Vect().Unit();
-	// calculating expected hit positions on ECAL (4-vect method)
-	Double_t sintersect_4vec = (ECAL_origin - vertex).Dot(ECAL_zaxis) / (Pefhat_4vec.Dot(ECAL_zaxis));
-	TVector3 ECAL_intersect_4vec = vertex + sintersect_4vec*Pefhat_4vec; 
-	T_xECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_xaxis);
-	T_yECAL_exp_4vec = (ECAL_intersect_4vec - ECAL_origin).Dot(ECAL_yaxis);
-	T_dx_4vec = xECAL - T_xECAL_exp_4vec;
-	T_dy_4vec = yECAL - T_yECAL_exp_4vec;   
-	T_nu_4vec = nu_4vec;
-	T_Q2_4vec = Q2_4vec;
-	T_W2_4vec = W2_4vec;
-	T_thpq_4vec = acos(Pefhat_obs.Dot(Pefhat_4vec));      	
-      }
-
-      T_isECALedge = isECALedge;
+      T_isHCALedge = isHCALedge;
       T_isNearBadChan = isNearBadChan;
 
       T_E_beam = E_beam;
-
+      
       T_heep_pp_pth = heep_pp_pth;
       T_heep_pp_eth = heep_pp_eth;
       T_heep_eth_pth = heep_eth_pth;
       T_heep_dpp = heep_dpp;
       T_heep_dxECAL = heep_dxECAL;
-      T_heep_dyECAL = heep_dyECAL;
+      T_heep_dyECAL = heep_dyECAL;      
       
       T_p_p = p_p;
       T_p_px = p_px;
       T_p_py = p_py;
       T_p_pz = p_pz;    
       T_E_p = E_p;
+      T_KE_p = KE_p;
+      T_KE_p_frac = KE_p_frac;
+      
       T_th_p = th_p;
       T_ph_p = ph_p; 
 
@@ -615,6 +574,15 @@ void elas_calib(char const *configfilename,
       T_Q2 = Q2;
       T_W2 = W2;
       
+      // Filling HCAL related branches
+      T_eHCAL = eHCAL;
+      T_xHCAL = xHCAL;
+      T_yHCAL = yHCAL;
+      T_rowblkHCAL = rowblkHCAL;
+      T_colblkHCAL = colblkHCAL;
+      T_idblkHCAL = idblkHCAL;
+      T_atimeHCAL = atimeHCAL;
+
       // Filling ECAL related branches
       T_eECAL = eECAL;
       T_xECAL = xECAL;
@@ -622,71 +590,73 @@ void elas_calib(char const *configfilename,
       T_rowblkECAL = rowblkECAL;
       T_colblkECAL = colblkECAL;
       T_idblkECAL = idblkECAL;
-      T_atimeECAL = atimeECAL;
+      T_atimeECAL = atimeECAL;      
       
       // Loop over all the blocks in main cluster and fill in A's
-      Double_t eECALcl = 0.;
-      for(Int_t blk=0; blk<nblkECAL; blk++){
-	Int_t blkID = int(idclblkECAL[blk]);	
-	if (eclblkECAL[blk]>hit_threshold) {
-	  Double_t cltdiff = atimeclblkECAL[blk]-atimeclblkECAL[0];
-	  Double_t engFrac = eclblkECAL[blk]/eclblkECAL[0];
-	  if (fabs(cltdiff)<tmax_cut && engFrac>=engFrac_cut) {
-	    Double_t eclblkECAL_i = eclblkECAL[blk];
-	    A[blkID] += eclblkECAL_i;
-	    eECALcl += eclblkECAL_i;
-	    // filling cluster level histos
-	    if (blk!=0) {
-	      h_ECALcltdiff->Fill(cltdiff);
-	      h2_ECALtdiff_vs_engFrac->Fill(engFrac,cltdiff);
-	    }
-	  }
-	}
-	h2_nev_per_blk->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
-	// if (blkID<=791) h2_nev_per_blk_bot->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
-	// else h2_nev_per_blk_top->Fill(colclblkECAL[blk],rowclblkECAL[blk],1.);
+      Double_t eHCALcl = 0.;
+      for(Int_t blk=0; blk<nblkHCAL; blk++){
+	Int_t blkID = int(idclblkHCAL[blk]) - 1;	
+	// if (eclblkHCAL[blk]>sh_hit_threshold) {
+	// Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
+	// Double_t shengFrac = eclblkHCAL[blk]/eclblkHCAL[0];
+	// if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
+	Double_t eclblkHCAL_i = eclblkHCAL[blk];
+	A[blkID] += eclblkHCAL_i;
+	eHCALcl += eclblkHCAL_i;
+	// filling cluster level histos
+	// if (blk!=0) {
+	//   h_HCALcltdiff->Fill(shtdiff);
+	//   h2_HCALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
+	// }
+	// }
+	// }
+	h2_nev_per_blk->Fill(colclblkHCAL[blk],rowclblkHCAL[blk],1.);
+	// if (blkID<=791) h2_nev_per_blk_bot->Fill(colclblkHCAL[blk],rowclblkHCAL[blk],1.);
+	// else h2_nev_per_blk_top->Fill(colclblkHCAL[blk],rowclblkHCAL[blk],1.);
 	nevents_per_blk[blkID]++; 
       }      
-      Double_t EovP = eECALcl/p_e_CURR;
+      Double_t EovEexp = eHCALcl/KE_p_frac;
+      Double_t eSF = eHCALcl/KE_p;      
       
-      T_EovP = EovP; // ********* need to move? After elastic cut formation?        
+      T_EovEexp = EovEexp; // ********* need to move? After elastic cut formation?
       
       // filling diagnostic histos
-      h_eECAL->Fill(eECALcl);
-      h_EovP->Fill(EovP);
+      h_eSF->Fill(eSF);
+      h_eHCAL->Fill(eHCALcl);
+      h_EovEexp->Fill(EovEexp);
 
-      h_xECAL_diff->Fill(T_dx);
-      h_yECAL_diff->Fill(T_dy);      
+      h_xHCAL_diff->Fill(dx);
+      h_yHCAL_diff->Fill(dy);      
      
-      // E/p vs. p
-      h2_EovP_vs_P->Fill(p_e_CURR,EovP);
-      h2_EovP_vs_P_prof->Fill(p_e_CURR, EovP, 1.);
+      // E/Eexp vs. p
+      h2_EovEexp_vs_P->Fill(KE_p_frac,EovEexp);
+      h2_EovEexp_vs_P_prof->Fill(KE_p_frac, EovEexp, 1.);
 
-      // E/p vs. blk
-      h2_EovP_vs_blk_raw->Fill(colblkECAL,rowblkECAL,EovP);
-      h2_count->Fill(colblkECAL,rowblkECAL,1.);
+      // E/Eexp vs. blk
+      h2_EovEexp_vs_blk_raw->Fill(colblkHCAL,rowblkHCAL,EovEexp);
+      h2_count->Fill(colblkHCAL,rowblkHCAL,1.);
       
-      // Correlation with expected track position
-      h2_eECAL_vs_xECALexp->Fill(T_xECAL_exp, eECALcl);
-      h2_eECAL_vs_yECALexp->Fill(T_yECAL_exp, eECALcl);      
-      h2_EovP_vs_xECALexp->Fill(T_xECAL_exp, EovP);
-      h2_EovP_vs_yECALexp->Fill(T_yECAL_exp, EovP);      
+      // // Correlation with expected track position
+      // h2_eHCAL_vs_xHCALexp->Fill(T_xECAL_exp, eHCALcl);
+      // h2_eHCAL_vs_yHCALexp->Fill(T_yHCAL_exp, eHCALcl);      
+      // h2_EovEexp_vs_xHCALexp->Fill(T_xHCAL_exp, EovEexp);
+      // h2_EovEexp_vs_yHCALexp->Fill(T_yHCAL_exp, EovEexp);      
 
-      // E/p vs. rnum
+      // E/Eexp vs. rnum
 
       // Clus variables vs. rnum
       
       // Lets form the matrix of linear equations
-      BuildMatrix(A,B,M,p_e_CURR);
+      BuildMatrix(A,B,M,KE_p_frac);
 
       Tout->Fill();
     } // global cut
   } // event loop
   std::cout << "\n\n";
-  h2_EovP_vs_blk->Divide(h2_EovP_vs_blk_raw, h2_count);
+  h2_EovEexp_vs_blk->Divide(h2_EovEexp_vs_blk_raw, h2_count);
 
   // Let's customize the histogram ranges
-  h2_EovP_vs_blk->GetZaxis()->SetRangeUser(0.6,1.2);  
+  h2_EovEexp_vs_blk->GetZaxis()->SetRangeUser(0.6,1.2);  
 
   // B.Print();  
   // M.Print();
@@ -695,10 +665,10 @@ void elas_calib(char const *configfilename,
   // // Time to calculate and report gain coefficients //
   // ////////////////////////////////////////////////////
 
-  TH1D *h_nevent_blk = new TH1D("h_nevent_blk", "No. of Good Events; ECAL Blocks", kNblks, 0, kNblks);
-  TH1D *h_coeff_Ratio_blk = new TH1D("h_coeff_Ratio_blk", "Ratio of Gain Coefficients(new/old); ECAL Blocks", kNblks, 0, kNblks);
-  TH1D *h_coeff_blk = new TH1D("h_coeff_blk", "ADC Gain Coefficients(GeV/pC); ECAL Blocks", kNblks, 0, kNblks);
-  TH1D *h_coeff_blk_old = new TH1D("h_old_coeff_blk", "Old ADC Gain Coefficients(GeV/pC); ECAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_nevent_blk = new TH1D("h_nevent_blk", "No. of Good Events; HCAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_Ratio_blk = new TH1D("h_coeff_Ratio_blk", "Ratio of Gain Coefficients(new/old); HCAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_blk = new TH1D("h_coeff_blk", "ADC Gain Coefficients(GeV/pC); HCAL Blocks", kNblks, 0, kNblks);
+  TH1D *h_coeff_blk_old = new TH1D("h_old_coeff_blk", "Old ADC Gain Coefficients(GeV/pC); HCAL Blocks", kNblks, 0, kNblks);
   TH2D *h2_coeff_detView_bot = new TH2D("h2_coeff_detView_bot", "New ADC Gain Coefficients (Bottom 23 Rows)", kNcols, 0, kNcols, 23, 0, 23);
   TH2D *h2_coeff_detView_old_bot = new TH2D("h2_coeff_detView_old_bot", "Old ADC Gain Coefficients (Bottom 23 Rows)", kNcols, 0, kNcols, 23, 0, 23);    
   TH2D *h2_coeff_detView_mid = new TH2D("h2_coeff_detView_mid", "New ADC Gain Coefficients (Middle 23 Rows)", kNcols, 0, kNcols, 23, 23, 46);
@@ -734,8 +704,7 @@ void elas_calib(char const *configfilename,
   Double_t newADCgratio[kNblks];
   for (int i=0; i<kNblks; i++) { newADCgratio[i] = -1000; }  
   for (int irow=0; irow<kNrows; irow++) {
-    int colMax = ncolprow[irow];
-    for (int icol=0; icol<colMax; icol++) {      
+    for (int icol=0; icol<kNcols; icol++) {      
       Double_t oldCoeff = oldADCgain[iblk];
       Double_t gainRatio = CoeffR(iblk);
       if(!badCells[iblk]) {
@@ -787,16 +756,15 @@ void elas_calib(char const *configfilename,
   } //row
   std::cout << std::endl;
 
-  //////////////////////////////////////////////////////////////////////
-  // 2nd Loop over all events to check the performance of calibration //
-  //////////////////////////////////////////////////////////////////////
+  // //////////////////////////////////////////////////////////////////////
+  // // 2nd Loop over all events to check the performance of calibration //
+  // //////////////////////////////////////////////////////////////////////
 
   // add branches to Tout to store values after calibration
-  Double_t T_eECAL_calib;  TBranch *T_eECAL_c = Tout->Branch("eECAL_calib", &T_eECAL_calib, "eECAL_calib/D");  
-  Double_t T_xECAL_calib;  TBranch *T_xECAL_c = Tout->Branch("xECAL_calib", &T_xECAL_calib, "xECAL_calib/D");
-  Double_t T_yECAL_calib;  TBranch *T_yECAL_c = Tout->Branch("yECAL_calib", &T_yECAL_calib, "yECAL_calib/D");
-  Double_t T_EovP_calib;   TBranch *T_EovP_c = Tout->Branch("EovP_calib", &T_EovP_calib, "EovP_calib/D");
-  Double_t T_thpq_calib;   TBranch *T_thpq_c = Tout->Branch("thpq_calib", &T_thpq_calib, "thpq_calib/D");    
+  Double_t T_eHCAL_calib;  TBranch *T_eHCAL_c = Tout->Branch("eHCAL_calib", &T_eHCAL_calib, "eHCAL_calib/D");  
+  Double_t T_xHCAL_calib;  TBranch *T_xHCAL_c = Tout->Branch("xHCAL_calib", &T_xHCAL_calib, "xHCAL_calib/D");
+  Double_t T_yHCAL_calib;  TBranch *T_yHCAL_c = Tout->Branch("yHCAL_calib", &T_yHCAL_calib, "yHCAL_calib/D");
+  Double_t T_EovEexp_calib;   TBranch *T_EovEexp_c = Tout->Branch("EovEexp_calib", &T_EovEexp_calib, "EovEexp_calib/D");  
 
   Nevents = C->GetEntries(), nevent=0;
   std::cout << "Looping over events again to check calibration.." << std::endl; 
@@ -826,16 +794,10 @@ void elas_calib(char const *configfilename,
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
     if (passedgCut) {
-      
-      // ECAL active area cut
-      isECALedge = edgeECALblks.count((int)idblkECAL);
-      if (isECALedge) continue;
 
-      // avoid events where seed is near known bad channels
-      if (cut_on_nearBADchan) {      
-	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,isdebug);
-	if (isNearBadChan) continue;  // apply the cut
-      }
+      // HCAL active area cut
+      isHCALedge = rowblkHCAL == 0 || rowblkHCAL == 23 || colblkHCAL == 0 || colblkHCAL == 11; 
+      if (isHCALedge) continue;
       
       TVector3 vertex(0,0,trVz[0]);
       
@@ -843,10 +805,14 @@ void elas_calib(char const *configfilename,
       p_p = trP[0];
       p_px = trPx[0];
       p_py = trPy[0];
-      p_pz = trPz[0];    
+      p_pz = trPz[0];
       E_p = sqrt(p_p*p_p + Mp*Mp);
+      KE_p = E_p - Mp;
+      // Applying HCAL sampling fraction
+      KE_p_frac = KE_p*HCAL_sf;      
+      
       th_p = TMath::ACos(trPz[0]/trP[0]);
-      ph_p = atan2(trPy[0],-trPx[0]); 
+      ph_p = atan2(trPy[0],-trPx[0]);
 
       // scattered electron kinematics (from p kinematics)
       p_e = E_beam + Mp - E_p;
@@ -863,80 +829,78 @@ void elas_calib(char const *configfilename,
       W2 = Mp*Mp + 2.*Mp*nu - Q2;
       TVector3 Pef_3vec(p_e_CURR*sin(th_e)*cos(ph_e), p_e_CURR*sin(th_e)*sin(ph_e), p_e_CURR*cos(th_e));    
       TVector3 Pefhat = Pef_3vec.Unit();
-      // calculating expected hit positions on ECAL (angles only method)
+      // calculating expected hit positions on HCAL (angles only method)
       Double_t sintersect = (ECAL_origin - vertex).Dot(ECAL_zaxis) / (Pefhat.Dot(ECAL_zaxis));
       TVector3 ECAL_intersect = vertex + sintersect*Pefhat; 
       Double_t xECAL_exp = (ECAL_intersect - ECAL_origin).Dot(ECAL_xaxis);
       Double_t yECAL_exp = (ECAL_intersect - ECAL_origin).Dot(ECAL_yaxis);
 
       // Calculating calibrated energy and cluster centroid
-      Double_t eECALcl_calib = 0., xECALcl_calib = 0., yECALcl_calib = 0., eclblkECAL_calib_HE = 0.;   
-      for(Int_t blk=0; blk<nblkECAL; blk++){
-	Int_t blkID = int(idclblkECAL[blk]);	
+      Double_t eHCALcl_calib = 0., xHCALcl_calib = 0., yHCALcl_calib = 0., eclblkHCAL_calib_HE = 0.;   
+      for(Int_t blk=0; blk<nblkHCAL; blk++){
+	Int_t blkID = int(idclblkHCAL[blk] - 1);	
 	// calculating the updated cluster centroid
-	xECALcl_calib = (xECALcl_calib*eECALcl_calib + xclblkECAL[blk]*eclblkECAL[blk]) / (eECALcl_calib+eclblkECAL[blk]);
-	yECALcl_calib = (yECALcl_calib*eECALcl_calib + yclblkECAL[blk]*eclblkECAL[blk]) / (eECALcl_calib+eclblkECAL[blk]);	
+	xHCALcl_calib = (xHCALcl_calib*eHCALcl_calib + xclblkHCAL[blk]*eclblkHCAL[blk]) / (eHCALcl_calib+eclblkHCAL[blk]);
+	yHCALcl_calib = (yHCALcl_calib*eHCALcl_calib + yclblkHCAL[blk]*eclblkHCAL[blk]) / (eHCALcl_calib+eclblkHCAL[blk]);	
 
-	if (blk==0) eclblkECAL_calib_HE = eclblkECAL[blk] * newADCgratio[blkID];
-	Double_t eclblkECAL_calib = eclblkECAL[blk] * newADCgratio[blkID];	
-	if (eclblkECAL[blk]>hit_threshold) {
-	  Double_t cltdiff = atimeclblkECAL[blk]-atimeclblkECAL[0];
-	  Double_t engFrac = eclblkECAL[blk]/eclblkECAL[0];
-	  if (fabs(cltdiff)<tmax_cut && engFrac>=engFrac_cut) {
-	    eECALcl_calib += eclblkECAL_calib;
-	    // filling cluster level histos
-	    if (blk!=0) {
-	      h_ECALcltdiff_calib->Fill(cltdiff);
-	      h2_ECALtdiff_vs_engFrac_calib->Fill(engFrac,cltdiff);
-	    }
-	  }
-	}
+	if (blk==0) eclblkHCAL_calib_HE = eclblkHCAL[blk] * newADCgratio[blkID];
+	Double_t eclblkHCAL_calib = eclblkHCAL[blk] * newADCgratio[blkID];
+	
+	// if (eclblkHCAL[blk]>sh_hit_threshold) {
+	// Double_t shtdiff = shClBlkAtime[blk]-shClBlkAtime[0];
+	// Double_t shengFrac = eclblkHCAL[blk]/eclblkHCAL[0];
+	// if (fabs(shtdiff)<sh_tmax_cut && shengFrac>=sh_engFrac_cut) {
+	eHCALcl_calib += eclblkHCAL_calib;
+	// filling cluster level histos
+	// if (blk!=0) {
+	//   h_HCALcltdiff->Fill(shtdiff);
+	//   h2_HCALtdiff_vs_engFrac->Fill(shengFrac,shtdiff);
+	// }
+	// }
+	// }
       }
-      Double_t EovP_calib = eECALcl_calib/p_e_CURR;
+      Double_t EovEexp_calib = eHCALcl_calib/KE_p_frac;
+      Double_t eSF_calib = eHCALcl_calib/KE_p;
 
       // filling output tree with calibrated entries
-      T_eECAL_calib = eECALcl_calib; T_eECAL_c->Fill();
-      T_xECAL_calib = xECALcl_calib; T_xECAL_c->Fill();
-      T_yECAL_calib = yECALcl_calib; T_yECAL_c->Fill();      
-      T_EovP_calib = eECALcl_calib/p_e_CURR; T_EovP_c->Fill();
-
-      // Let's calculate the e- track based on ECAL cluster (Observed)
-      TVector3 ECAL_pos = ECAL_origin + xECALcl_calib*ECAL_xaxis + yECALcl_calib*ECAL_yaxis;
-      TVector3 Pefhat_obs = (ECAL_pos - vertex).Unit();
-      T_thpq_calib = acos(Pefhat_obs.Dot(Pefhat)); T_thpq_c->Fill();      
+      T_eHCAL_calib = eHCALcl_calib; T_eHCAL_c->Fill();
+      T_xHCAL_calib = xHCALcl_calib; T_xHCAL_c->Fill();
+      T_yHCAL_calib = yHCALcl_calib; T_yHCAL_c->Fill();      
+      T_EovEexp_calib = EovEexp_calib; T_EovEexp_c->Fill();      
 
       // filling diagnostic histos
-      h_eECAL_calib->Fill(eECALcl_calib);
-      h_EovP_calib->Fill(EovP_calib);
+      h_eSF_calib->Fill(eSF_calib);
+      h_eHCAL_calib->Fill(eHCALcl_calib);
+      h_EovEexp_calib->Fill(EovEexp_calib);
 
-      h_xECAL_diff_calib->Fill(xECALcl_calib - xECAL_exp);
-      h_yECAL_diff_calib->Fill(yECALcl_calib - yECAL_exp);      
+      // h_xHCAL_diff_calib->Fill(xHCALcl_calib - xHCAL_exp);
+      // h_yHCAL_diff_calib->Fill(yHCALcl_calib - yHCAL_exp);      
      
-      // E/p vs. p
-      h2_EovP_vs_P_calib->Fill(p_e_CURR,EovP_calib);
-      h2_EovP_vs_P_prof_calib->Fill(p_e_CURR, EovP_calib, 1.);
+      // E/Eexp vs. p
+      h2_EovEexp_vs_P_calib->Fill(p_e_CURR,EovEexp_calib);
+      h2_EovEexp_vs_P_prof_calib->Fill(p_e_CURR, EovEexp_calib, 1.);
 
-      // E/p vs. blk
-      h2_EovP_vs_blk_raw_calib->Fill(colblkECAL,rowblkECAL,EovP_calib);
-      h2_count_calib->Fill(colblkECAL,rowblkECAL,1.);
+      // E/Eexp vs. blk
+      h2_EovEexp_vs_blk_raw_calib->Fill(colblkHCAL,rowblkHCAL,EovEexp_calib);
+      h2_count_calib->Fill(colblkHCAL,rowblkHCAL,1.);
       
       // Correlation with expected track position
-      h2_eECAL_vs_xECALexp_calib->Fill(xECAL_exp, eECALcl_calib);
-      h2_eECAL_vs_yECALexp_calib->Fill(yECAL_exp, eECALcl_calib);      
-      h2_EovP_vs_xECALexp_calib->Fill(xECAL_exp, EovP_calib);
-      h2_EovP_vs_yECALexp_calib->Fill(yECAL_exp, EovP_calib);      
+      // h2_eHCAL_vs_xHCALexp_calib->Fill(xHCAL_exp, eHCALcl_calib);
+      // h2_eHCAL_vs_yHCALexp_calib->Fill(yHCAL_exp, eHCALcl_calib);      
+      // h2_EovEexp_vs_xHCALexp_calib->Fill(xHCAL_exp, EovEexp_calib);
+      // h2_EovEexp_vs_yHCALexp_calib->Fill(yHCAL_exp, EovEexp_calib);      
 
-      // E/p vs. rnum
+      // E/Eexp vs. rnum
 
       // Clus variables vs. rnum
           
     }
   }
   std::cout << "\n\n";
-  h2_EovP_vs_blk_calib->Divide(h2_EovP_vs_blk_raw_calib, h2_count_calib);
+  h2_EovEexp_vs_blk_calib->Divide(h2_EovEexp_vs_blk_raw_calib, h2_count_calib);
 
   // Let's customize the histogram ranges
-  h2_EovP_vs_blk_calib->GetZaxis()->SetRangeUser(0.6,1.2);    
+  h2_EovEexp_vs_blk_calib->GetZaxis()->SetRangeUser(0.6,1.2);    
 
   /////////////////////////////////
   // Generating diagnostic plots //
@@ -944,216 +908,228 @@ void elas_calib(char const *configfilename,
   /**** Global settings ****/
   //gStyle->SetPalette(kRainBow);
 
-  /**** Canvas 1 (E/p) ****/
-  TCanvas *c1 = new TCanvas("c1","E/p",1500,1000);
-  c1->Divide(2,1);
+  /**** Canvas 1 (E/Eexp) ****/
+  TCanvas *c1 = new TCanvas("c1","E/Eexp",1500,1000);
+  c1->Divide(2,2);
   c1->cd(1); //
   gPad->SetGridx();
   Double_t param[3], param_bc[3], sigerr, sigerr_bc;
-  Int_t maxBin_bc = h_EovP->GetMaximumBin();
-  Double_t binW_bc = h_EovP->GetBinWidth(maxBin_bc), norm_bc = h_EovP->GetMaximum();
-  Double_t mean_bc = h_EovP->GetMean(), stdev_bc = h_EovP->GetStdDev();
-  Double_t lower_lim_bc = h_EovP_min + maxBin_bc*binW_bc - EovP_fit_width*stdev_bc;
-  Double_t upper_lim_bc = h_EovP_min + maxBin_bc*binW_bc + EovP_fit_width*stdev_bc; 
-  TF1* fitg_bc = new TF1("fitg_bc","gaus",h_EovP_min,h_EovP_max);
+  Int_t maxBin_bc = h_EovEexp->GetMaximumBin();
+  Double_t binW_bc = h_EovEexp->GetBinWidth(maxBin_bc), norm_bc = h_EovEexp->GetMaximum();
+  Double_t mean_bc = h_EovEexp->GetMean(), stdev_bc = h_EovEexp->GetStdDev();
+  Double_t lower_lim_bc = h_EovEexp_min + maxBin_bc*binW_bc - EovEexp_fit_width*stdev_bc;
+  Double_t upper_lim_bc = h_EovEexp_min + maxBin_bc*binW_bc + EovEexp_fit_width*stdev_bc; 
+  TF1* fitg_bc = new TF1("fitg_bc","gaus",h_EovEexp_min,h_EovEexp_max);
   fitg_bc->SetRange(lower_lim_bc,upper_lim_bc);
   fitg_bc->SetParameters(norm_bc,mean_bc,stdev_bc);
   fitg_bc->SetLineWidth(2); fitg_bc->SetLineColor(1);
-  h_EovP->Fit(fitg_bc,"QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
-  h_EovP->SetLineWidth(2); h_EovP->SetLineColor(kRed); h_EovP->SetFillColorAlpha(kRed,0.4);
-  Int_t maxBin = h_EovP_calib->GetMaximumBin();
-  Double_t binW = h_EovP_calib->GetBinWidth(maxBin), norm = h_EovP_calib->GetMaximum();
-  Double_t mean = h_EovP_calib->GetMean(), stdev = h_EovP_calib->GetStdDev();
-  Double_t lower_lim = h_EovP_min + maxBin*binW - EovP_fit_width*stdev;
-  Double_t upper_lim = h_EovP_min + maxBin*binW + EovP_fit_width*stdev; 
-  TF1* fitg = new TF1("fitg","gaus",h_EovP_min,h_EovP_max);
+  h_EovEexp->Fit(fitg_bc,"QR"); fitg_bc->GetParameters(param_bc); sigerr_bc = fitg_bc->GetParError(2);
+  h_EovEexp->SetLineWidth(2); h_EovEexp->SetLineColor(kRed); h_EovEexp->SetFillColorAlpha(kRed,0.4);
+  Int_t maxBin = h_EovEexp_calib->GetMaximumBin();
+  Double_t binW = h_EovEexp_calib->GetBinWidth(maxBin), norm = h_EovEexp_calib->GetMaximum();
+  Double_t mean = h_EovEexp_calib->GetMean(), stdev = h_EovEexp_calib->GetStdDev();
+  Double_t lower_lim = h_EovEexp_min + maxBin*binW - EovEexp_fit_width*stdev;
+  Double_t upper_lim = h_EovEexp_min + maxBin*binW + EovEexp_fit_width*stdev; 
+  TF1* fitg = new TF1("fitg","gaus",h_EovEexp_min,h_EovEexp_max);
   fitg->SetRange(lower_lim,upper_lim);
   fitg->SetParameters(norm,mean,stdev);
   fitg->SetLineWidth(2); fitg->SetLineColor(1);
-  h_EovP_calib->Fit(fitg,"QR"); fitg->GetParameters(param); sigerr = fitg->GetParError(2);
-  h_EovP_calib->SetLineWidth(2); h_EovP_calib->SetLineColor(kGreen+2); h_EovP_calib->SetFillColorAlpha(kGreen+2,0.4);
+  h_EovEexp_calib->Fit(fitg,"QR"); fitg->GetParameters(param); sigerr = fitg->GetParError(2);
+  h_EovEexp_calib->SetLineWidth(2); h_EovEexp_calib->SetLineColor(kGreen+2); h_EovEexp_calib->SetFillColorAlpha(kGreen+2,0.4);
   // adjusting histogram height for the legend to fit properly
-  h_EovP_calib->GetYaxis()->SetRangeUser(0.,max(norm,norm_bc)*1.2);
-  h_EovP_calib->Draw(); h_EovP->Draw("same");
+  h_EovEexp_calib->GetYaxis()->SetRangeUser(0.,max(norm,norm_bc)*1.2);
+  h_EovEexp_calib->Draw(); h_EovEexp->Draw("same");
   // draw the legend
   TLegend *l = new TLegend(0.10,0.78,0.90,0.90);
   l->SetTextFont(42);
-  l->AddEntry(h_EovP,Form("Before calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100),"l");
-  l->AddEntry(h_EovP_calib,Form("After calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100),"l");
+  l->AddEntry(h_EovEexp,Form("Before calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100),"l");
+  l->AddEntry(h_EovEexp_calib,Form("After calib., #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100),"l");
   l->Draw();
-  c1->cd(2); //
-  TPad *pad1 = new TPad("pad1", "Top Pad", 0.0, 0.5, 1.0, 1.0);
-  pad1->Draw();
-  pad1->cd();
-  gPad->SetGridy();
-  gStyle->SetErrorX(0.0001);
-  h2_EovP_vs_P->SetStats(0);
-  h2_EovP_vs_P->Draw("colz");
-  h2_EovP_vs_P_prof->Draw("same");
-  c1->cd(2); //
-  TPad *pad2 = new TPad("pad2", "Bottom Pad", 0.0, 0.0, 1.0, 0.5);
-  pad2->Draw();
-  pad2->cd();
-  gPad->SetGridy();
-  gStyle->SetErrorX(0.0001);
-  h2_EovP_vs_P_calib->SetStats(0);
-  h2_EovP_vs_P_calib->Draw("colz");
-  h2_EovP_vs_P_prof_calib->Draw("same");
+  // c1->cd(2); //
+  // TPad *pad1 = new TPad("pad1", "Top Pad", 0.0, 0.5, 1.0, 1.0);
+  // pad1->Draw();
+  // pad1->cd();
+  // gPad->SetGridy();
+  // gStyle->SetErrorX(0.0001);
+  // h2_EovEexp_vs_P->SetStats(0);
+  // h2_EovEexp_vs_P->Draw("colz");
+  // h2_EovEexp_vs_P_prof->Draw("same");
+  // c1->cd(2); //
+  // TPad *pad2 = new TPad("pad2", "Bottom Pad", 0.0, 0.0, 1.0, 0.5);
+  // pad2->Draw();
+  // pad2->cd();
+  // gPad->SetGridy();
+  // gStyle->SetErrorX(0.0001);
+  // h2_EovEexp_vs_P_calib->SetStats(0);
+  // h2_EovEexp_vs_P_calib->Draw("colz");
+  // h2_EovEexp_vs_P_prof_calib->Draw("same");
   // c1->cd(4); //
-  // h2_EovP_vs_blk->SetStats(0);
-  // h2_EovP_vs_blk->Draw("colz text");
+  // h2_EovEexp_vs_blk->SetStats(0);
+  // h2_EovEexp_vs_blk->Draw("colz text");
   // c1->cd(5); //
-  // h2_EovP_vs_blk_calib->SetStats(0);
-  // h2_EovP_vs_blk_calib->Draw("colz text");
+  // h2_EovEexp_vs_blk_calib->SetStats(0);
+  // h2_EovEexp_vs_blk_calib->Draw("colz text");
   // c1->cd(6); //
-  // h2_EovP_vs_PSblk_calib->SetStats(0);
-  // h2_EovP_vs_PSblk_calib->Draw("colz text");
+  // h2_EovEexp_vs_PSblk_calib->SetStats(0);
+  // h2_EovEexp_vs_PSblk_calib->Draw("colz text");
+  c1->cd(2);
+  gPad->SetGridx();
+  h_eSF->SetLineWidth(2); h_eSF->SetLineColor(kRed); h_eSF->SetFillColorAlpha(kRed,0.4);
+  h_eSF_calib->SetLineWidth(2); h_eSF_calib->SetLineColor(kGreen+2); h_eSF_calib->SetFillColorAlpha(kGreen+2,0.4);  
+  h_eSF_calib->Draw();
+  h_eSF->Draw("same");
+  c1->cd(3);
+  gPad->SetGridx();
+  h_eHCAL->SetLineWidth(2); h_eHCAL->SetLineColor(kRed); h_eHCAL->SetFillColorAlpha(kRed,0.4);
+  h_eHCAL_calib->SetLineWidth(2); h_eHCAL_calib->SetLineColor(kGreen+2); h_eHCAL_calib->SetFillColorAlpha(kGreen+2,0.4);  
+  h_eHCAL_calib->Draw();
+  h_eHCAL->Draw("same");
   c1->SaveAs(Form("%s[",outPlot.Data())); c1->SaveAs(Form("%s",outPlot.Data())); c1->Write();
   //**** -- ***//
 
   // /**** Canvas 2 (Corr. with tr vars.) ****/
-  TCanvas *c2 = new TCanvas("c2","E/p vs blk",1500,1200);
+  TCanvas *c2 = new TCanvas("c2","E/Eexp vs blk",1500,1200);
   c2->Divide(2,1);
   c2->cd(1); //
-  h2_EovP_vs_blk->SetStats(0);
-  h2_EovP_vs_blk->Draw("colz");
+  h2_EovEexp_vs_blk->SetStats(0);
+  h2_EovEexp_vs_blk->Draw("colz");
   c2->cd(2); //
-  h2_EovP_vs_blk_calib->SetStats(0);
-  h2_EovP_vs_blk_calib->Draw("colz");
+  h2_EovEexp_vs_blk_calib->SetStats(0);
+  h2_EovEexp_vs_blk_calib->Draw("colz");
   c2->SaveAs(Form("%s",outPlot.Data())); c2->Write();
   //**** -- ***//
   
-  /**** Canvas 3 (Corr. with tr vars.) ****/
-  TCanvas *c3 = new TCanvas("c3","E/p vs x, y exp",1500,1200);
-  c3->Divide(2,2);
-  c3->cd(1); //
-  gPad->SetGridy();
-  h2_EovP_vs_xECALexp->SetStats(0);
-  h2_EovP_vs_xECALexp->Draw("colz");
-  c3->cd(2); //
-  gPad->SetGridy();
-  h2_EovP_vs_yECALexp->SetStats(0);
-  h2_EovP_vs_yECALexp->Draw("colz");
-  c3->cd(3); //
-  gPad->SetGridy();
-  h2_EovP_vs_xECALexp_calib->SetStats(0);
-  h2_EovP_vs_xECALexp_calib->Draw("colz");
-  c3->cd(4); //
-  gPad->SetGridy();
-  h2_EovP_vs_yECALexp_calib->SetStats(0);
-  h2_EovP_vs_yECALexp_calib->Draw("colz");
-  c3->SaveAs(Form("%s",outPlot.Data())); c3->Write();
-  //**** -- ***//
+  // /**** Canvas 3 (Corr. with tr vars.) ****/
+  // TCanvas *c3 = new TCanvas("c3","E/Eexp vs x, y exp",1500,1200);
+  // c3->Divide(2,2);
+  // c3->cd(1); //
+  // gPad->SetGridy();
+  // h2_EovEexp_vs_xHCALexp->SetStats(0);
+  // h2_EovEexp_vs_xHCALexp->Draw("colz");
+  // c3->cd(2); //
+  // gPad->SetGridy();
+  // h2_EovEexp_vs_yHCALexp->SetStats(0);
+  // h2_EovEexp_vs_yHCALexp->Draw("colz");
+  // c3->cd(3); //
+  // gPad->SetGridy();
+  // h2_EovEexp_vs_xHCALexp_calib->SetStats(0);
+  // h2_EovEexp_vs_xHCALexp_calib->Draw("colz");
+  // c3->cd(4); //
+  // gPad->SetGridy();
+  // h2_EovEexp_vs_yHCALexp_calib->SetStats(0);
+  // h2_EovEexp_vs_yHCALexp_calib->Draw("colz");
+  // c3->SaveAs(Form("%s",outPlot.Data())); c3->Write();
+  // //**** -- ***//
 
-  /**** Canvas 4 (Corr. with tr vars.) ****/
-  TCanvas *c4 = new TCanvas("c4","eECAL vs x, y exp",1500,1200);
-  c4->Divide(2,2);
-  c4->cd(1); //
-  gPad->SetGridy();
-  h2_eECAL_vs_xECALexp->SetStats(0);
-  h2_eECAL_vs_xECALexp->Draw("colz");
-  c4->cd(2); //
-  gPad->SetGridy();
-  h2_eECAL_vs_yECALexp->SetStats(0);
-  h2_eECAL_vs_yECALexp->Draw("colz");
-  c4->cd(3); //
-  gPad->SetGridy();
-  h2_eECAL_vs_xECALexp_calib->SetStats(0);
-  h2_eECAL_vs_xECALexp_calib->Draw("colz");
-  c4->cd(4); //
-  gPad->SetGridy();
-  h2_eECAL_vs_yECALexp_calib->SetStats(0);
-  h2_eECAL_vs_yECALexp_calib->Draw("colz");
-  c4->SaveAs(Form("%s",outPlot.Data())); c4->Write();
-  //**** -- ***//
+  // /**** Canvas 4 (Corr. with tr vars.) ****/
+  // TCanvas *c4 = new TCanvas("c4","eHCAL vs x, y exp",1500,1200);
+  // c4->Divide(2,2);
+  // c4->cd(1); //
+  // gPad->SetGridy();
+  // h2_eHCAL_vs_xHCALexp->SetStats(0);
+  // h2_eHCAL_vs_xHCALexp->Draw("colz");
+  // c4->cd(2); //
+  // gPad->SetGridy();
+  // h2_eHCAL_vs_yHCALexp->SetStats(0);
+  // h2_eHCAL_vs_yHCALexp->Draw("colz");
+  // c4->cd(3); //
+  // gPad->SetGridy();
+  // h2_eHCAL_vs_xHCALexp_calib->SetStats(0);
+  // h2_eHCAL_vs_xHCALexp_calib->Draw("colz");
+  // c4->cd(4); //
+  // gPad->SetGridy();
+  // h2_eHCAL_vs_yHCALexp_calib->SetStats(0);
+  // h2_eHCAL_vs_yHCALexp_calib->Draw("colz");
+  // c4->SaveAs(Form("%s",outPlot.Data())); c4->Write();
+  // //**** -- ***//
 
-  /**** Canvas 5 (position resolution) ****/
-  TCanvas *c5 = new TCanvas("c5","pos. res.",1200,1000);
-  c5->Divide(2,2);  gStyle->SetOptFit(1111);
-  c5->cd(1); //
-  TF1* fit_c51 = new TF1("fit_c51","gaus",-0.5,0.5);
-  h_xECAL_diff->Fit(fit_c51,"QR");
-  h_xECAL_diff->SetStats(1);
-  c5->cd(2); //
-  TF1* fit_c52 = new TF1("fit_c52","gaus",-0.5,0.5);
-  h_yECAL_diff->Fit(fit_c52,"QR");
-  h_yECAL_diff->SetStats(1);
-  c5->cd(3); //
-  TF1* fit_c53 = new TF1("fit_c53","gaus",-0.5,0.5);
-  h_xECAL_diff_calib->Fit(fit_c53,"QR");
-  h_xECAL_diff_calib->SetStats(1);
-  c5->cd(4); //
-  TF1* fit_c54 = new TF1("fit_c54","gaus",-0.5,0.5);
-  h_yECAL_diff_calib->Fit(fit_c54,"QR");
-  h_yECAL_diff_calib->SetStats(1);
-  c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
-  //**** -- ***//
-
-  // /**** Canvas 5 (E/p vs. run number) ****/
-  // TCanvas *c5 = new TCanvas("c5","E/p vs rnum",1200,1000);
-  // c5->Divide(1,2);
-  // // // manipulating urnum vector
-  // // std::size_t nrun = lrnum.size();
-  // // if (nrun!=Nruns)
-  // //   std::cout << "*!*[WARNING] 'Nruns' value in run list doesn't match with total # runs analyzed!\n\n"; 
+  // /**** Canvas 5 (position resolution) ****/
+  // TCanvas *c5 = new TCanvas("c5","pos. res.",1200,1000);
+  // c5->Divide(2,2);  gStyle->SetOptFit(1111);
   // c5->cd(1); //
-  // gPad->SetGridy();
-  // gStyle->SetErrorX(0.0001); 
-  // Custm2DRnumHisto(h2_EovP_vs_rnum,lrnum);
-  // h2_EovP_vs_rnum->Draw("colz");
-  // h2_EovP_vs_rnum_prof->Draw("same");
+  // TF1* fit_c51 = new TF1("fit_c51","gaus",-0.5,0.5);
+  // h_xHCAL_diff->Fit(fit_c51,"QR");
+  // h_xHCAL_diff->SetStats(1);
   // c5->cd(2); //
-  // gPad->SetGridy();
-  // gStyle->SetErrorX(0.0001);
-  // Custm2DRnumHisto(h2_EovP_vs_rnum_calib,lrnum);
-  // h2_EovP_vs_rnum_calib->Draw("colz");
-  // h2_EovP_vs_rnum_calib_prof->Draw("same");
+  // TF1* fit_c52 = new TF1("fit_c52","gaus",-0.5,0.5);
+  // h_yHCAL_diff->Fit(fit_c52,"QR");
+  // h_yHCAL_diff->SetStats(1);
+  // c5->cd(3); //
+  // TF1* fit_c53 = new TF1("fit_c53","gaus",-0.5,0.5);
+  // h_xHCAL_diff_calib->Fit(fit_c53,"QR");
+  // h_xHCAL_diff_calib->SetStats(1);
+  // c5->cd(4); //
+  // TF1* fit_c54 = new TF1("fit_c54","gaus",-0.5,0.5);
+  // h_yHCAL_diff_calib->Fit(fit_c54,"QR");
+  // h_yHCAL_diff_calib->SetStats(1);
   // c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
   // //**** -- ***//
 
-  /**** Canvas 7 (gain coefficients TOP) ****/
-  TCanvas *c7 = new TCanvas("c7","gain Coeff top",1200,1000);
-  TStyle* oldStyle = (TStyle*)gStyle->Clone("oldStyle");
-  gStyle->SetPaintTextFormat("0.4f");  
-  c7->Divide(1,2);
-  c7->cd(1); Double_t h_max;  
-  h_max = h_coeff_blk_old->GetMaximum();
-  h2_coeff_detView_old_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_top->Draw("text col");
-  c7->cd(2); //
-  h_max = h_coeff_blk->GetMaximum();
-  h2_coeff_detView_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_top->Draw("text col");
-  //
-  c7->SaveAs(Form("%s",outPlot.Data())); c7->Write();
-  //**** -- ***//
+  // // /**** Canvas 5 (E/Eexp vs. run number) ****/
+  // // TCanvas *c5 = new TCanvas("c5","E/Eexp vs rnum",1200,1000);
+  // // c5->Divide(1,2);
+  // // // // manipulating urnum vector
+  // // // std::size_t nrun = lrnum.size();
+  // // // if (nrun!=Nruns)
+  // // //   std::cout << "*!*[WARNING] 'Nruns' value in run list doesn't match with total # runs analyzed!\n\n"; 
+  // // c5->cd(1); //
+  // // gPad->SetGridy();
+  // // gStyle->SetErrorX(0.0001); 
+  // // Custm2DRnumHisto(h2_EovEexp_vs_rnum,lrnum);
+  // // h2_EovEexp_vs_rnum->Draw("colz");
+  // // h2_EovEexp_vs_rnum_prof->Draw("same");
+  // // c5->cd(2); //
+  // // gPad->SetGridy();
+  // // gStyle->SetErrorX(0.0001);
+  // // Custm2DRnumHisto(h2_EovEexp_vs_rnum_calib,lrnum);
+  // // h2_EovEexp_vs_rnum_calib->Draw("colz");
+  // // h2_EovEexp_vs_rnum_calib_prof->Draw("same");
+  // // c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
+  // // //**** -- ***//
 
-  /**** Canvas 8 (gain coefficients MIDDLE) ****/
-  TCanvas *c8 = new TCanvas("c8","gain Coeff mid",1200,1000);
-  c8->Divide(1,2);
-  c8->cd(1); 
-  h_max = h_coeff_blk_old->GetMaximum();
-  h2_coeff_detView_old_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_mid->Draw("text col");
-  c8->cd(2); //
-  h_max = h_coeff_blk->GetMaximum();
-  h2_coeff_detView_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_mid->Draw("text col");
-  //
-  c8->SaveAs(Form("%s",outPlot.Data())); c8->Write();
-  //**** -- ***//
+  // /**** Canvas 7 (gain coefficients TOP) ****/
+  // TCanvas *c7 = new TCanvas("c7","gain Coeff top",1200,1000);
+  // TStyle* oldStyle = (TStyle*)gStyle->Clone("oldStyle");
+  // gStyle->SetPaintTextFormat("0.4f");  
+  // c7->Divide(1,2);
+  // c7->cd(1); Double_t h_max;  
+  // h_max = h_coeff_blk_old->GetMaximum();
+  // h2_coeff_detView_old_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_top->Draw("text col");
+  // c7->cd(2); //
+  // h_max = h_coeff_blk->GetMaximum();
+  // h2_coeff_detView_top->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_top->Draw("text col");
+  // //
+  // c7->SaveAs(Form("%s",outPlot.Data())); c7->Write();
+  // //**** -- ***//
 
-  /**** Canvas 9 (gain coefficients BOTTOM) ****/
-  TCanvas *c9 = new TCanvas("c9","gain Coeff bot",1200,1000);
-  c9->Divide(1,2);
-  c9->cd(1); 
-  h_max = h_coeff_blk_old->GetMaximum();
-  h2_coeff_detView_old_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_bot->Draw("text col");
-  c9->cd(2); //
-  h_max = h_coeff_blk->GetMaximum();
-  h2_coeff_detView_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_bot->Draw("text col");
-  //
-  c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
-  //
-  gStyle->SetPaintTextFormat(oldStyle->GetPaintTextFormat());
-  delete oldStyle;
-  //**** -- ***//
+  // /**** Canvas 8 (gain coefficients MIDDLE) ****/
+  // TCanvas *c8 = new TCanvas("c8","gain Coeff mid",1200,1000);
+  // c8->Divide(1,2);
+  // c8->cd(1); 
+  // h_max = h_coeff_blk_old->GetMaximum();
+  // h2_coeff_detView_old_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_mid->Draw("text col");
+  // c8->cd(2); //
+  // h_max = h_coeff_blk->GetMaximum();
+  // h2_coeff_detView_mid->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_mid->Draw("text col");
+  // //
+  // c8->SaveAs(Form("%s",outPlot.Data())); c8->Write();
+  // //**** -- ***//
+
+  // /**** Canvas 9 (gain coefficients BOTTOM) ****/
+  // TCanvas *c9 = new TCanvas("c9","gain Coeff bot",1200,1000);
+  // c9->Divide(1,2);
+  // c9->cd(1); 
+  // h_max = h_coeff_blk_old->GetMaximum();
+  // h2_coeff_detView_old_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_old_bot->Draw("text col");
+  // c9->cd(2); //
+  // h_max = h_coeff_blk->GetMaximum();
+  // h2_coeff_detView_bot->GetZaxis()->SetRangeUser(0.002,h_max); h2_coeff_detView_bot->Draw("text col");
+  // //
+  // c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
+  // //
+  // gStyle->SetPaintTextFormat(oldStyle->GetPaintTextFormat());
+  // delete oldStyle;
+  // //**** -- ***//
 
   /**** Canvas 10 (# events per block) ****/
   TCanvas *c10 = new TCanvas("c10","good ev per blk",1500,1200);
@@ -1169,27 +1145,27 @@ void elas_calib(char const *configfilename,
   c10->SaveAs(Form("%s",outPlot.Data())); c10->Write();
   //**** -- ***//
 
-  // /**** Canvas 9 (cluster size) ****/
-  // TCanvas *c9 = new TCanvas("c9","cl. size vs rnum",1200,1000);
-  // c9->Divide(1,4);
-  // c9->cd(1); //
-  // Custm2DRnumHisto(h2_PSclsize_vs_rnum,lrnum);
-  // h2_PSclsize_vs_rnum->Draw("colz");
-  // h2_PSclsize_vs_rnum_prof->Draw("same");
-  // c9->cd(2); //
-  // Custm2DRnumHisto(h2_PSclmult_vs_rnum,lrnum);
-  // h2_PSclmult_vs_rnum->Draw("colz");
-  // h2_PSclmult_vs_rnum_prof->Draw("same");
-  // c9->cd(3); //
-  // Custm2DRnumHisto(h2clsize_vs_rnum,lrnum); 
-  // h2clsize_vs_rnum->Draw("colz");
-  // h2clsize_vs_rnum_prof->Draw("same");
-  // c9->cd(4); //
-  // Custm2DRnumHisto(h2clmult_vs_rnum,lrnum);
-  // h2clmult_vs_rnum->Draw("colz");
-  // h2clmult_vs_rnum_prof->Draw("same");
-  // c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
-  // //**** -- ***//
+  // // /**** Canvas 9 (cluster size) ****/
+  // // TCanvas *c9 = new TCanvas("c9","cl. size vs rnum",1200,1000);
+  // // c9->Divide(1,4);
+  // // c9->cd(1); //
+  // // Custm2DRnumHisto(h2_PSclsize_vs_rnum,lrnum);
+  // // h2_PSclsize_vs_rnum->Draw("colz");
+  // // h2_PSclsize_vs_rnum_prof->Draw("same");
+  // // c9->cd(2); //
+  // // Custm2DRnumHisto(h2_PSclmult_vs_rnum,lrnum);
+  // // h2_PSclmult_vs_rnum->Draw("colz");
+  // // h2_PSclmult_vs_rnum_prof->Draw("same");
+  // // c9->cd(3); //
+  // // Custm2DRnumHisto(h2clsize_vs_rnum,lrnum); 
+  // // h2clsize_vs_rnum->Draw("colz");
+  // // h2clsize_vs_rnum_prof->Draw("same");
+  // // c9->cd(4); //
+  // // Custm2DRnumHisto(h2clmult_vs_rnum,lrnum);
+  // // h2clmult_vs_rnum->Draw("colz");
+  // // h2clmult_vs_rnum_prof->Draw("same");
+  // // c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
+  // // //**** -- ***//
 
   /**** Summary Canvas ****/
   TCanvas *cSummary = new TCanvas("cSummary","Summary");
@@ -1197,10 +1173,9 @@ void elas_calib(char const *configfilename,
   TPaveText *pt = new TPaveText(.05,.1,.95,.8);
   pt->AddText(Form(" Date of creation: %s",GetDate().c_str()));
   pt->AddText(Form("Configfile: ECAL_replay/scripts/cfg/%s.cfg",cfgfilebase.Data()));
-  pt->AddText(Form("BAD Chan ID File: ECAL_replay/scripts/%s",badchan_file.Data()));  
   pt->AddText(Form(" Total # events analyzed: %lld ",Nevents));
-  pt->AddText(Form(" E/p (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
-  pt->AddText(Form(" E/p (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
+  pt->AddText(Form(" E/Eexp (before calib.) | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param_bc[1],param_bc[2]*100,sigerr_bc*100));
+  pt->AddText(Form(" E/Eexp (after calib.)    | #mu = %.2f, #sigma = (%.3f #pm %.3f) p",param[1],param[2]*100,sigerr*100));
   pt->AddText(" Global cuts: ");
   std::string tmpstr = "";
   for (std::size_t i=0; i<gCutList.size(); i++) {
@@ -1208,8 +1183,8 @@ void elas_calib(char const *configfilename,
     tmpstr += gCutList[i] + ", "; 
   }
   if (!tmpstr.empty()) pt->AddText(Form(" %s",tmpstr.c_str()));
-  if (cut_on_eECAL) pt->AddText(Form(" ECAL cluster energy < %.1f GeV",eECAL_cut_limit));
-  if (cut_on_EovP) pt->AddText(Form(" |E/p - 1| < %.1f",EovP_cut_limit));
+  if (cut_on_eHCAL) pt->AddText(Form(" HCAL cluster energy < %.1f GeV",eHCAL_cut_limit));
+  if (cut_on_EovEexp) pt->AddText(Form(" |E/Eexp - 1| < %.1f",EovEexp_cut_limit));
   pt->AddText(Form(" # events passed global cuts: %lld", Ngoodevs));
   pt->AddText(" Other cuts: ");
   pt->AddText(Form(" Minimum # events per block: %d | Cluster hit threshold: %.2f GeV",Nmin,hit_threshold));
@@ -1219,8 +1194,8 @@ void elas_calib(char const *configfilename,
   sw->Stop(); sw2->Stop();
   pt->AddText(Form("Macro processing time: CPU %.1fs | Real %.1fs",sw->CpuTime(),sw->RealTime()));
   TText *t1 = pt->GetLineWith("Configfile"); t1->SetTextColor(kRed+2);
-  TText *t2 = pt->GetLineWith(" E/p (be"); t2->SetTextColor(kRed);
-  TText *t3 = pt->GetLineWith(" E/p (af"); t3->SetTextColor(kGreen+2);
+  TText *t2 = pt->GetLineWith(" E/Eexp (be"); t2->SetTextColor(kRed);
+  TText *t3 = pt->GetLineWith(" E/Eexp (af"); t3->SetTextColor(kGreen+2);
   TText *t4 = pt->GetLineWith(" Global"); t4->SetTextColor(kBlue);
   TText *t5 = pt->GetLineWith(" Other"); t5->SetTextColor(kBlue);
   // TText *t6 = pt->GetLineWith(" Various"); t6->SetTextColor(kBlue);
@@ -1244,29 +1219,27 @@ void elas_calib(char const *configfilename,
   // to be able to read them using uproot          //
   ///////////////////////////////////////////////////  
   Tout->Write("", TObject::kOverwrite);
-  // diagnostic histos
-  h_eECAL->Write(); h_eECAL_calib->Write();    
-  h_EovP->Write(); h_EovP_calib->Write();
-  h_xECAL_diff->Write(); h_xECAL_diff_calib->Write();
-  h_yECAL_diff->Write(); h_yECAL_diff_calib->Write();      
-  // correlations
-  h2_EovP_vs_P->Write(); h2_EovP_vs_P_calib->Write();
-  h2_EovP_vs_P_prof->Write(); h2_EovP_vs_P_prof_calib->Write();
-  h2_EovP_vs_blk->Write(); h2_EovP_vs_blk_calib->Write();
-  h2_EovP_vs_xECALexp->Write(); h2_EovP_vs_xECALexp_calib->Write();
-  h2_EovP_vs_yECALexp->Write(); h2_EovP_vs_yECALexp_calib->Write();
-  h2_eECAL_vs_xECALexp->Write(); h2_eECAL_vs_xECALexp_calib->Write();
-  h2_eECAL_vs_yECALexp->Write(); h2_eECAL_vs_yECALexp_calib->Write();
-  // gains
-  h_nevent_blk->Write(); h_coeff_Ratio_blk->Write();
-  h_coeff_blk->Write(); h_coeff_blk_old->Write();
-  h2_coeff_detView_bot->Write(); h2_coeff_detView_old_bot->Write();  
-  h2_coeff_detView_mid->Write(); h2_coeff_detView_old_mid->Write();  
-  h2_coeff_detView_top->Write(); h2_coeff_detView_old_top->Write();  
-  h2_nev_per_blk->Write();
-  // cluster level histos
-  h_ECALcltdiff->Write();  h_ECALcltdiff_calib->Write();
-  h2_ECALtdiff_vs_engFrac->Write(); h2_ECALtdiff_vs_engFrac_calib->Write();
+//   // diagnostic histos
+  h_eSF->Write(); h_eSF_calib->Write();      
+  h_eHCAL->Write(); h_eHCAL_calib->Write();    
+  h_EovEexp->Write(); h_EovEexp_calib->Write();
+//   h_xHCAL_diff->Write(); h_xHCAL_diff_calib->Write();
+//   h_yHCAL_diff->Write(); h_yHCAL_diff_calib->Write();      
+//   // correlations
+//   h2_EovEexp_vs_P->Write(); h2_EovEexp_vs_P_calib->Write();
+//   h2_EovEexp_vs_P_prof->Write(); h2_EovEexp_vs_P_prof_calib->Write();
+//   h2_EovEexp_vs_blk->Write(); h2_EovEexp_vs_blk_calib->Write();
+//   h2_EovEexp_vs_xHCALexp->Write(); h2_EovEexp_vs_xHCALexp_calib->Write();
+//   h2_EovEexp_vs_yHCALexp->Write(); h2_EovEexp_vs_yHCALexp_calib->Write();
+//   h2_eHCAL_vs_xHCALexp->Write(); h2_eHCAL_vs_xHCALexp_calib->Write();
+//   h2_eHCAL_vs_yHCALexp->Write(); h2_eHCAL_vs_yHCALexp_calib->Write();
+//   // gains
+//   h_nevent_blk->Write(); h_coeff_Ratio_blk->Write();
+//   h_coeff_blk->Write(); h_coeff_blk_old->Write();
+//   h2_coeff_detView_bot->Write(); h2_coeff_detView_old_bot->Write();  
+//   h2_coeff_detView_mid->Write(); h2_coeff_detView_old_mid->Write();  
+//   h2_coeff_detView_top->Write(); h2_coeff_detView_old_top->Write();  
+//   h2_nev_per_blk->Write();
 }
 
 // **** ========== Useful functions ========== ****  
@@ -1351,7 +1324,7 @@ std::unordered_set<int> GetEdgeBlkID(LookUpTableReader& ecalmap, bool isdebug) {
   return edgeblkid;
 }
 
-// Extracts # of Columns per Row from the ECAL map
+// Extracts # of Columns per Row from the HCAL map
 std::unordered_map<int,int> GetNColPerRow(LookUpTableReader& ecalmap, bool isdebug) {
   std::unordered_map<int,int> ncolprow;
   for (int iblk=0; iblk<kNblks; iblk++) {
