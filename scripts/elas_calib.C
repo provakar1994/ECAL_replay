@@ -41,6 +41,7 @@ const int kNcols = 27; // varies by row. 27 is the maxc.
 string GetDate();
 void CustmProfHisto(TH1*);
 TString GetOutFileBase(TString);
+void Custm2DRnumHisto(TH2D*, std::vector<std::string> const & lrnum);
 std::vector<int> ReadNumFromTextFileToV(const std::string &filename);
 void BuildMatrix(const double *A, TVectorD &B, TMatrixD &M, Double_t p_e);
 std::vector<std::string> SplitString(char const delim, std::string const str);
@@ -83,9 +84,12 @@ void elas_calib(char const *configfilename,
   Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
   // analysis related
   bool cut_on_W2=0, cut_on_EovP=0, cut_on_eECAL=0, cut_on_nearBADchan=0;
-  bool isECALedge=0, isNearBadChan=0;
+  bool indtADC=0, isECALedge=0, isNearBadChan=0;
   Double_t r_max, r2_max;
   Double_t W2_mean, W2_sigma, W2_nsigma;
+  Double_t dt_mean, dt_sigma, dt_nsigma;
+  Double_t dt_mean_1, dt_sigma_1, dt_nsigma_1;
+  Double_t dt_mean_2, dt_sigma_2, dt_nsigma_2;    
   Double_t EovP_cut_limit, eECAL_cut_limit;
   Double_t hit_threshold=0., engFrac_cut=0., tmax_cut=1000.;    
   // kinematic related
@@ -186,6 +190,16 @@ void elas_calib(char const *configfilename,
 	cut_on_EovP = ((TObjString*)(*tokens)[1])->GetString().Atoi();
 	EovP_cut_limit = ((TObjString*)(*tokens)[2])->GetString().Atof();
       }
+      if( skey == "dt_ADC_cut_1" ){
+	dt_mean_1 = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	dt_sigma_1 = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	dt_nsigma_1 = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "dt_ADC_cut_2" ){
+	dt_mean_2 = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	dt_sigma_2 = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	dt_nsigma_2 = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }      
       if( skey == "W2_cut" ){
 	cut_on_W2 = ((TObjString*)(*tokens)[1])->GetString().Atoi();
 	W2_mean = ((TObjString*)(*tokens)[2])->GetString().Atof();
@@ -305,16 +319,17 @@ void elas_calib(char const *configfilename,
   C->SetBranchStatus("heep.*", 1);
   Double_t heep_pp_pth;          C->SetBranchAddress("heep.pp_pth", &heep_pp_pth);
   Double_t heep_pp_eth;          C->SetBranchAddress("heep.pp_eth", &heep_pp_eth);
-  Double_t heep_eth_pth;         C->SetBranchAddress("heep.eth_pth", &heep_eth_pth);  
+  Double_t heep_eth_pth;         C->SetBranchAddress("heep.eth_pth", &heep_eth_pth);
   Double_t heep_dpp;             C->SetBranchAddress("heep.dpp", &heep_dpp);  
+  Double_t heep_dt_ADC;          C->SetBranchAddress("heep.dt_ADC", &heep_dt_ADC);  
   Double_t heep_dxECAL;          C->SetBranchAddress("heep.dxECAL", &heep_dxECAL);
   Double_t heep_dyECAL;          C->SetBranchAddress("heep.dyECAL", &heep_dyECAL);    
   // Event info
-  // C->SetMakeClass(1);
-  // C->SetBranchStatus("fEvtHdr.*", 1);
-  // UInt_t rnum;                   C->SetBranchAddress("fEvtHdr.fRun", &rnum);
-  // UInt_t trigbits;               C->SetBranchAddress("fEvtHdr.fTrigBits", &trigbits);
-  // ULong64_t gevnum;              C->SetBranchAddress("fEvtHdr.fEvtNum", &gevnum);
+  C->SetMakeClass(1);
+  C->SetBranchStatus("fEvtHdr.*", 1);
+  UInt_t rnum;                   C->SetBranchAddress("fEvtHdr.fRun", &rnum);
+  UInt_t trigbits;               C->SetBranchAddress("fEvtHdr.fTrigBits", &trigbits);
+  ULong64_t gevnum;              C->SetBranchAddress("fEvtHdr.fEvtNum", &gevnum);
   // turning on additional branches for the global cut
   //C->SetBranchStatus("sbs.gemFPP.*", 0);
   C->SetBranchStatus("sbs.gemFT.*", 1);  
@@ -395,6 +410,19 @@ void elas_calib(char const *configfilename,
   // TH2D *h2_nev_per_blk_bot = new TH2D("h2_nev_per_blk_bot","# good ev per blk (Bottom Half);ECAL cols;ECAL rows",kNcols,0,kNcols,33,0,33);
   // TH2D *h2_nev_per_blk_top = new TH2D("h2_nev_per_blk_top","# good ev per blk (Top Half);ECAL cols;ECAL rows",kNcols,0,kNcols,35,34,69);  
 
+  // Across runs
+  Double_t Nruns = 1000; // Max # runs we anticipate to analyze   
+  TH2D *h2_clsize_vs_rnum = new TH2D("h2_clsize_vs_rnum","(Best) Cluster Size vs Run no",Nruns,0.5,Nruns+0.5,25,0,25);
+  TProfile *h2_clsize_vs_rnum_prof = new TProfile("h2_clsize_vs_rnum_prof"," (Best) Cluster Size vs Run no. (Profile)",Nruns,0.5,Nruns+0.5,0,25,"S");
+  TH2D *h2_clmult_vs_rnum = new TH2D("h2_clmult_vs_rnum","Cluster Multiplicity vs Run no",Nruns,0.5,Nruns+0.5,35,0,35);
+  TProfile *h2_clmult_vs_rnum_prof = new TProfile("h2_clmult_vs_rnum_prof","Cluster Multiplicity vs Run no. (Profile)",Nruns,0.5,Nruns+0.5,0,35,"S");    
+  TH2D *h2_EovP_vs_rnum = new TH2D("h2_EovP_vs_rnum","E/p vs Run no. | Before",Nruns,0.5,Nruns+0.5,200,h2_EovP_min,h2_EovP_max);
+  TProfile *h2_EovP_vs_rnum_prof = new TProfile("h2_EovP_vs_rnum_prof","E/p vs Run no. (Profile) | Before",Nruns,0.5,Nruns+0.5,h2_EovP_min,h2_EovP_max,"S");
+  TH2D *h2_EovP_vs_rnum_calib = new TH2D("h2_EovP_vs_rnum_calib","E/p vs Run no. | After",Nruns,0.5,Nruns+0.5,200,h2_EovP_min,h2_EovP_max);
+  TProfile *h2_EovP_vs_rnum_prof_calib = new TProfile("h2_EovP_vs_rnum_prof_calib","E/p vs Run no. (Profile) | After",Nruns,0.5,Nruns+0.5,h2_EovP_min,h2_EovP_max,"S");
+  TH2D *h2_dtADC_vs_rnum = new TH2D("h2_dtADC_vs_rnum","dt ADC vs Run no. | Before",Nruns,0.5,Nruns+0.5,200,-15.,150.);
+  TProfile *h2_dtADC_vs_rnum_prof = new TProfile("h2_dtADC_vs_rnum_prof","dt ADC vs Run no. (Profile) | Before",Nruns,0.5,Nruns+0.5,0,140,"S");  
+  
   // individual cluster level histograms
   TH1D *h_ECALcltdiff = new TH1D("h_ECALcltdiff","ECAL ADC time diff. bet. secondary blocks in cluster",200,-60,60);
   TH1D *h_ECALcltdiff_calib = new TH1D("h_ECALcltdiff_calib","ECAL ADC time diff. bet. secondary blocks in cluster",200,-60,60);  
@@ -405,12 +433,17 @@ void elas_calib(char const *configfilename,
   TTree *Tout = new TTree("Tout", cfgfilebase.Data()); 
   Tout->SetMaxTreeSize(4000000000LL);
   //
+  UInt_t    T_rnum;     Tout->Branch("rnum", &T_rnum, "rnum/i");  // The run number for each set of data. This is important because run numbers are not always continuous.
+  ULong64_t T_gevnum;   Tout->Branch("gevnum", &T_gevnum, "gevnum/l");  // Global event number  
+  //
+  bool T_indtADC;        Tout->Branch("indtADC", &T_indtADC, "indtADC/O");  
   bool T_isECALedge;     Tout->Branch("isECALedge", &T_isECALedge, "isECALedge/O");
   bool T_isNearBadChan;  Tout->Branch("isNearBadChan", &T_isNearBadChan, "isNearBadChan/O");  
   //
   Double_t T_heep_dpp;    Tout->Branch("heep_dpp", &T_heep_dpp, "heep_dpp/D");
   Double_t T_heep_pp_pth; Tout->Branch("heep_pp_pth", &T_heep_pp_pth, "heep_pp_pth/D");
   Double_t T_heep_pp_eth; Tout->Branch("heep_pp_eth", &T_heep_pp_eth, "heep_pp_eth/D");
+  Double_t T_heep_dt_ADC; Tout->Branch("heep_dt_ADC", &T_heep_dt_ADC, "heep_dt_ADC/D");
   Double_t T_heep_dxECAL; Tout->Branch("heep_dxECAL", &T_heep_dxECAL, "heep_dxECAL/D");
   Double_t T_heep_dyECAL; Tout->Branch("heep_dyECAL", &T_heep_dyECAL, "heep_dyECAL/D");    
   Double_t T_heep_eth_pth;Tout->Branch("heep_eth_pth", &T_heep_eth_pth, "heep_eth_pth/D");
@@ -491,11 +524,11 @@ void elas_calib(char const *configfilename,
       treenum = currenttreenum;
       GlobalCut->UpdateFormulaLeaves();
 
-      // // track change of runnum
-      // if (nevent == 1 || rnum != runnum) {
-      // 	runnum = rnum; itrrun++;
-      // 	lrnum.push_back(to_string(rnum));
-      // }
+      // track change of runnum
+      if (nevent == 1 || rnum != runnum) {
+	runnum = rnum; itrrun++;
+	lrnum.push_back(to_string(rnum));
+      }
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
     if (passedgCut) {      
@@ -511,6 +544,19 @@ void elas_calib(char const *configfilename,
 	if (isNearBadChan) continue;  // apply the cut
       }
 
+      // Applying dt cut
+      if (rnum<2660) {
+	dt_mean = dt_mean_1;
+	dt_sigma = dt_sigma_1;
+	dt_nsigma = dt_nsigma_1;
+      } else {
+	dt_mean = dt_mean_2;
+	dt_sigma = dt_sigma_2;
+	dt_nsigma = dt_nsigma_2;	
+      }
+      indtADC = abs(heep_dt_ADC-dt_mean)<dt_sigma*dt_nsigma;
+      if (!indtADC) continue;
+      
       // keeping count of events passing globcal cuts
       Ngoodevs++;
       
@@ -584,6 +630,10 @@ void elas_calib(char const *configfilename,
 	T_thpq_4vec = acos(Pefhat_obs.Dot(Pefhat_4vec));      	
       }
 
+      T_rnum = rnum;
+      T_gevnum = gevnum;      
+
+      T_indtADC = indtADC;
       T_isECALedge = isECALedge;
       T_isNearBadChan = isNearBadChan;
 
@@ -593,6 +643,7 @@ void elas_calib(char const *configfilename,
       T_heep_pp_eth = heep_pp_eth;
       T_heep_eth_pth = heep_eth_pth;
       T_heep_dpp = heep_dpp;
+      T_heep_dt_ADC = heep_dt_ADC;      
       T_heep_dxECAL = heep_dxECAL;
       T_heep_dyECAL = heep_dyECAL;
       
@@ -673,8 +724,17 @@ void elas_calib(char const *configfilename,
       h2_EovP_vs_yECALexp->Fill(T_yECAL_exp, EovP);      
 
       // E/p vs. rnum
+      h2_EovP_vs_rnum->Fill(itrrun, EovP);
+      h2_EovP_vs_rnum_prof->Fill(itrrun, EovP, 1.);
 
+      h2_dtADC_vs_rnum->Fill(itrrun, heep_dt_ADC);
+      h2_dtADC_vs_rnum_prof->Fill(itrrun, heep_dt_ADC, 1.);      
+      
       // Clus variables vs. rnum
+      h2_clsize_vs_rnum->Fill(itrrun, nblkECAL);
+      h2_clsize_vs_rnum_prof->Fill(itrrun, nblkECAL, 1.);
+      h2_clmult_vs_rnum->Fill(itrrun, nclusECAL);
+      h2_clmult_vs_rnum_prof->Fill(itrrun, nclusECAL, 1.);      
       
       // Lets form the matrix of linear equations
       BuildMatrix(A,B,M,p_e_CURR);
@@ -686,7 +746,13 @@ void elas_calib(char const *configfilename,
   h2_EovP_vs_blk->Divide(h2_EovP_vs_blk_raw, h2_count);
 
   // Let's customize the histogram ranges
-  h2_EovP_vs_blk->GetZaxis()->SetRangeUser(0.6,1.2);  
+  h2_EovP_vs_blk->GetZaxis()->SetRangeUser(0.6,1.2);
+
+  // Customizing profile histograms
+  CustmProfHisto(h2_EovP_vs_P_prof); CustmProfHisto(h2_EovP_vs_P_prof_calib);
+  CustmProfHisto(h2_EovP_vs_rnum_prof); CustmProfHisto(h2_EovP_vs_rnum_prof_calib);
+  CustmProfHisto(h2_dtADC_vs_rnum_prof); 
+  CustmProfHisto(h2_clsize_vs_rnum_prof); CustmProfHisto(h2_clmult_vs_rnum_prof);  
 
   // B.Print();  
   // M.Print();
@@ -798,6 +864,7 @@ void elas_calib(char const *configfilename,
   Double_t T_EovP_calib;   TBranch *T_EovP_c = Tout->Branch("EovP_calib", &T_EovP_calib, "EovP_calib/D");
   Double_t T_thpq_calib;   TBranch *T_thpq_c = Tout->Branch("thpq_calib", &T_thpq_calib, "thpq_calib/D");    
 
+  itrrun=0; runnum=0;   
   Nevents = C->GetEntries(), nevent=0;
   std::cout << "Looping over events again to check calibration.." << std::endl; 
   while(C->GetEntry(nevent++)) {
@@ -819,10 +886,10 @@ void elas_calib(char const *configfilename,
       treenum = currenttreenum;
       GlobalCut->UpdateFormulaLeaves();
 
-      // // track change of runnum
-      // if (nevent == 1 || rnum != runnum) {
-      // 	runnum = rnum; itrrun++;
-      // }
+      // track change of runnum
+      if (nevent == 1 || rnum != runnum) {
+	runnum = rnum; itrrun++;
+      }
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
     if (passedgCut) {
@@ -836,6 +903,19 @@ void elas_calib(char const *configfilename,
 	isNearBadChan = ISNearBADChan(xyBADchan,xclblkECAL[0],yclblkECAL[0],r2_max,isdebug);
 	if (isNearBadChan) continue;  // apply the cut
       }
+
+      // Applying dt cut
+      if (rnum<2660) {
+	dt_mean = dt_mean_1;
+	dt_sigma = dt_sigma_1;
+	dt_nsigma = dt_nsigma_1;
+      } else {
+	dt_mean = dt_mean_2;
+	dt_sigma = dt_sigma_2;
+	dt_nsigma = dt_nsigma_2;	
+      }
+      indtADC = abs(heep_dt_ADC-dt_mean)<dt_sigma*dt_nsigma;
+      if (!indtADC) continue;      
       
       TVector3 vertex(0,0,trVz[0]);
       
@@ -927,8 +1007,8 @@ void elas_calib(char const *configfilename,
       h2_EovP_vs_yECALexp_calib->Fill(yECAL_exp, EovP_calib);      
 
       // E/p vs. rnum
-
-      // Clus variables vs. rnum
+      h2_EovP_vs_rnum_calib->Fill(itrrun, EovP_calib);
+      h2_EovP_vs_rnum_prof_calib->Fill(itrrun, EovP_calib, 1.);
           
     }
   }
@@ -1006,8 +1086,8 @@ void elas_calib(char const *configfilename,
   // h2_EovP_vs_blk_calib->SetStats(0);
   // h2_EovP_vs_blk_calib->Draw("colz text");
   // c1->cd(6); //
-  // h2_EovP_vs_PSblk_calib->SetStats(0);
-  // h2_EovP_vs_PSblk_calib->Draw("colz text");
+  // h2_EovP_vs_blk_calib->SetStats(0);
+  // h2_EovP_vs_blk_calib->Draw("colz text");
   c1->SaveAs(Form("%s[",outPlot.Data())); c1->SaveAs(Form("%s",outPlot.Data())); c1->Write();
   //**** -- ***//
 
@@ -1089,27 +1169,27 @@ void elas_calib(char const *configfilename,
   c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
   //**** -- ***//
 
-  // /**** Canvas 5 (E/p vs. run number) ****/
-  // TCanvas *c5 = new TCanvas("c5","E/p vs rnum",1200,1000);
-  // c5->Divide(1,2);
-  // // // manipulating urnum vector
-  // // std::size_t nrun = lrnum.size();
-  // // if (nrun!=Nruns)
-  // //   std::cout << "*!*[WARNING] 'Nruns' value in run list doesn't match with total # runs analyzed!\n\n"; 
-  // c5->cd(1); //
-  // gPad->SetGridy();
-  // gStyle->SetErrorX(0.0001); 
-  // Custm2DRnumHisto(h2_EovP_vs_rnum,lrnum);
-  // h2_EovP_vs_rnum->Draw("colz");
-  // h2_EovP_vs_rnum_prof->Draw("same");
-  // c5->cd(2); //
-  // gPad->SetGridy();
-  // gStyle->SetErrorX(0.0001);
-  // Custm2DRnumHisto(h2_EovP_vs_rnum_calib,lrnum);
-  // h2_EovP_vs_rnum_calib->Draw("colz");
-  // h2_EovP_vs_rnum_calib_prof->Draw("same");
-  // c5->SaveAs(Form("%s",outPlot.Data())); c5->Write();
-  // //**** -- ***//
+  /**** Canvas 6 (E/p vs. run number) ****/
+  TCanvas *c6 = new TCanvas("c6","E/p vs rnum",1200,1000);
+  c6->Divide(1,2);
+  // // manipulating urnum vector
+  // std::size_t nrun = lrnum.size();
+  // if (nrun!=Nruns)
+  //   std::cout << "*!*[WARNING] 'Nruns' value in run list doesn't match with total # runs analyzed!\n\n"; 
+  c6->cd(1); //
+  gPad->SetGridy();
+  gStyle->SetErrorX(0.0001); 
+  Custm2DRnumHisto(h2_EovP_vs_rnum,lrnum);
+  h2_EovP_vs_rnum->Draw("colz");
+  h2_EovP_vs_rnum_prof->Draw("same");
+  c6->cd(2); //
+  gPad->SetGridy();
+  gStyle->SetErrorX(0.0001);
+  Custm2DRnumHisto(h2_EovP_vs_rnum_calib,lrnum);
+  h2_EovP_vs_rnum_calib->Draw("colz");
+  h2_EovP_vs_rnum_prof_calib->Draw("same");
+  c6->SaveAs(Form("%s",outPlot.Data())); c6->Write();
+  //**** -- ***//
 
   /**** Canvas 7 (gain coefficients TOP) ****/
   TCanvas *c7 = new TCanvas("c7","gain Coeff top",1200,1000);
@@ -1169,26 +1249,22 @@ void elas_calib(char const *configfilename,
   c10->SaveAs(Form("%s",outPlot.Data())); c10->Write();
   //**** -- ***//
 
-  // /**** Canvas 9 (cluster size) ****/
-  // TCanvas *c9 = new TCanvas("c9","cl. size vs rnum",1200,1000);
-  // c9->Divide(1,4);
-  // c9->cd(1); //
-  // Custm2DRnumHisto(h2_PSclsize_vs_rnum,lrnum);
-  // h2_PSclsize_vs_rnum->Draw("colz");
-  // h2_PSclsize_vs_rnum_prof->Draw("same");
-  // c9->cd(2); //
-  // Custm2DRnumHisto(h2_PSclmult_vs_rnum,lrnum);
-  // h2_PSclmult_vs_rnum->Draw("colz");
-  // h2_PSclmult_vs_rnum_prof->Draw("same");
-  // c9->cd(3); //
-  // Custm2DRnumHisto(h2clsize_vs_rnum,lrnum); 
-  // h2clsize_vs_rnum->Draw("colz");
-  // h2clsize_vs_rnum_prof->Draw("same");
-  // c9->cd(4); //
-  // Custm2DRnumHisto(h2clmult_vs_rnum,lrnum);
-  // h2clmult_vs_rnum->Draw("colz");
-  // h2clmult_vs_rnum_prof->Draw("same");
-  // c9->SaveAs(Form("%s",outPlot.Data())); c9->Write();
+  /**** Canvas 11 (cluster size) ****/
+  TCanvas *c11 = new TCanvas("c11","cl. size vs rnum",1200,1000);
+  c11->Divide(1,3);
+  c11->cd(1); //
+  Custm2DRnumHisto(h2_clsize_vs_rnum,lrnum);
+  h2_clsize_vs_rnum->Draw("colz");
+  h2_clsize_vs_rnum_prof->Draw("same");
+  c11->cd(2); //
+  Custm2DRnumHisto(h2_clmult_vs_rnum,lrnum);
+  h2_clmult_vs_rnum->Draw("colz");
+  h2_clmult_vs_rnum_prof->Draw("same");
+  c11->cd(3); //
+  Custm2DRnumHisto(h2_dtADC_vs_rnum,lrnum);
+  h2_dtADC_vs_rnum->Draw("colz");
+  h2_dtADC_vs_rnum_prof->Draw("same");  
+  c11->SaveAs(Form("%s",outPlot.Data())); c11->Write();
   // //**** -- ***//
 
   /**** Summary Canvas ****/
@@ -1267,6 +1343,11 @@ void elas_calib(char const *configfilename,
   // cluster level histos
   h_ECALcltdiff->Write();  h_ECALcltdiff_calib->Write();
   h2_ECALtdiff_vs_engFrac->Write(); h2_ECALtdiff_vs_engFrac_calib->Write();
+  // vs rnum
+  h2_EovP_vs_rnum->Write(); h2_EovP_vs_rnum_calib->Write();
+  h2_EovP_vs_rnum_prof->Write(); h2_EovP_vs_rnum_prof_calib->Write();
+  h2_clsize_vs_rnum->Write(); h2_clsize_vs_rnum_prof->Write();
+  h2_clmult_vs_rnum->Write(); h2_clmult_vs_rnum_prof->Write();  
 }
 
 // **** ========== Useful functions ========== ****  
@@ -1307,6 +1388,16 @@ void CustmProfHisto(TH1* hprof) {
   hprof->SetStats(0);
   hprof->SetMarkerStyle(20);
   hprof->SetMarkerColor(2);
+}
+
+// Customizes 2D histos with run # on the X-axis
+void Custm2DRnumHisto(TH2D* h, std::vector<std::string> const & lrnum)
+{
+  h->SetStats(0);
+  h->GetXaxis()->SetLabelSize(0.05);
+  h->GetXaxis()->SetRange(1,lrnum.size());
+  for (int i=0; i<lrnum.size(); i++) h->GetXaxis()->SetBinLabel(i+1,lrnum[i].c_str());
+  if (lrnum.size()>15) h->LabelsOption("v", "X");
 }
 
 // Forms the matrices

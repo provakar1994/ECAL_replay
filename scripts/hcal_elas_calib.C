@@ -84,9 +84,12 @@ void hcal_elas_calib(char const *configfilename,
   Double_t h2_p_coarse_bin=25, h2_p_coarse_min=0., h2_p_coarse_max=5.;
   // analysis related
   bool cut_on_W2=0, cut_on_EovEexp=0, cut_on_eHCAL=0, cut_on_nearBADchan=0;
-  bool isHCALedge=0, isNearBadChan=0;
+  bool indtADC=0, isHCALedge=0, isNearBadChan=0;
   Double_t r_max, r2_max;
   Double_t W2_mean, W2_sigma, W2_nsigma;
+  Double_t dt_mean, dt_sigma, dt_nsigma;
+  Double_t dt_mean_1, dt_sigma_1, dt_nsigma_1;
+  Double_t dt_mean_2, dt_sigma_2, dt_nsigma_2;      
   Double_t EovEexp_cut_limit, eHCAL_cut_limit;
   Double_t hit_threshold=0., engFrac_cut=0., tmax_cut=1000.;    
   // kinematic related
@@ -194,6 +197,16 @@ void hcal_elas_calib(char const *configfilename,
 	W2_sigma = ((TObjString*)(*tokens)[3])->GetString().Atof();
 	W2_nsigma = ((TObjString*)(*tokens)[4])->GetString().Atof();
       }
+      if( skey == "dt_ADC_cut_1" ){
+	dt_mean_1 = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	dt_sigma_1 = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	dt_nsigma_1 = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }
+      if( skey == "dt_ADC_cut_2" ){
+	dt_mean_2 = ((TObjString*)(*tokens)[1])->GetString().Atof();
+	dt_sigma_2 = ((TObjString*)(*tokens)[2])->GetString().Atof();
+	dt_nsigma_2 = ((TObjString*)(*tokens)[3])->GetString().Atof();
+      }            
       if( skey == "h_W2" ){
 	h_W2_bin = ((TObjString*)(*tokens)[1])->GetString().Atoi();
 	h_W2_min = ((TObjString*)(*tokens)[2])->GetString().Atof();
@@ -311,18 +324,19 @@ void hcal_elas_calib(char const *configfilename,
   Double_t heep_pp_pth;          C->SetBranchAddress("heep.pp_pth", &heep_pp_pth);
   Double_t heep_pp_eth;          C->SetBranchAddress("heep.pp_eth", &heep_pp_eth);
   Double_t heep_eth_pth;         C->SetBranchAddress("heep.eth_pth", &heep_eth_pth);  
-  Double_t heep_dpp;             C->SetBranchAddress("heep.dpp", &heep_dpp);  
+  Double_t heep_dpp;             C->SetBranchAddress("heep.dpp", &heep_dpp);
+  Double_t heep_dt_ADC;          C->SetBranchAddress("heep.dt_ADC", &heep_dt_ADC);    
   Double_t heep_dxECAL;          C->SetBranchAddress("heep.dxECAL", &heep_dxECAL);
   Double_t heep_dyECAL;          C->SetBranchAddress("heep.dyECAL", &heep_dyECAL);  
   // Event info
   C->SetMakeClass(1);
-  // C->SetBranchStatus("fEvtHdr.*", 1);
-  // UInt_t rnum;                   C->SetBranchAddress("fEvtHdr.fRun", &rnum);
-  // UInt_t trigbits;               C->SetBranchAddress("fEvtHdr.fTrigBits", &trigbits);
-  // ULong64_t gevnum;              C->SetBranchAddress("fEvtHdr.fEvtNum", &gevnum);
+  C->SetBranchStatus("fEvtHdr.*", 1);
+  UInt_t rnum;                   C->SetBranchAddress("fEvtHdr.fRun", &rnum);
+  UInt_t trigbits;               C->SetBranchAddress("fEvtHdr.fTrigBits", &trigbits);
+  ULong64_t gevnum;              C->SetBranchAddress("fEvtHdr.fEvtNum", &gevnum);
   // turning on additional branches for the global cut
-  //C->SetBranchStatus("sbs.gemFPP.*", 1);
-  //  C->SetBranchStatus("heep.*", 1);
+  C->SetBranchStatus("sbs.gemFT.*", 1);
+  // C->SetBranchStatus("heep.*", 1);
   // C->SetBranchStatus("sbs.gem.track.ngoodhits", 1);
   // C->SetBranchStatus("sbs.gem.track.chi2ndf", 1);
 
@@ -393,12 +407,17 @@ void hcal_elas_calib(char const *configfilename,
   TTree *Tout = new TTree("Tout", cfgfilebase.Data()); 
   Tout->SetMaxTreeSize(4000000000LL);
   //
+  UInt_t    T_rnum;     Tout->Branch("rnum", &T_rnum, "rnum/i");  // The run number for each set of data. This is important because run numbers are not always continuous.
+  ULong64_t T_gevnum;   Tout->Branch("gevnum", &T_gevnum, "gevnum/l");  // Global event number    
+  //
+  bool T_indtADC;        Tout->Branch("indtADC", &T_indtADC, "indtADC/O");  
   bool T_isHCALedge;     Tout->Branch("isHCALedge", &T_isHCALedge, "isHCALedge/O");
   bool T_isNearBadChan;  Tout->Branch("isNearBadChan", &T_isNearBadChan, "isNearBadChan/O");  
   //
   Double_t T_heep_dpp;    Tout->Branch("heep_dpp", &T_heep_dpp, "heep_dpp/D");
   Double_t T_heep_pp_pth; Tout->Branch("heep_pp_pth", &T_heep_pp_pth, "heep_pp_pth/D");
   Double_t T_heep_pp_eth; Tout->Branch("heep_pp_eth", &T_heep_pp_eth, "heep_pp_eth/D");
+  Double_t T_heep_dt_ADC; Tout->Branch("heep_dt_ADC", &T_heep_dt_ADC, "heep_dt_ADC/D");  
   Double_t T_heep_dxECAL; Tout->Branch("heep_dxECAL", &T_heep_dxECAL, "heep_dxECAL/D");
   Double_t T_heep_dyECAL; Tout->Branch("heep_dyECAL", &T_heep_dyECAL, "heep_dyECAL/D");    
   Double_t T_heep_eth_pth;Tout->Branch("heep_eth_pth", &T_heep_eth_pth, "heep_eth_pth/D");
@@ -477,19 +496,18 @@ void hcal_elas_calib(char const *configfilename,
 
     // get old gain coefficients (do it before applying global cut)
     oldADCgain[int(idblkHCAL)-1] = againblkHCAL;
-    
-
+        
     // apply global cuts efficiently (AJRP method)
     currenttreenum = C->GetTreeNumber();
     if (nevent == 1 || currenttreenum != treenum) {
       treenum = currenttreenum;
       GlobalCut->UpdateFormulaLeaves();
 
-      // // track change of runnum
-      // if (nevent == 1 || rnum != runnum) {
-      // 	runnum = rnum; itrrun++;
-      // 	lrnum.push_back(to_string(rnum));
-      // }
+      // track change of runnum
+      if (nevent == 1 || rnum != runnum) {
+	runnum = rnum; itrrun++;
+	lrnum.push_back(to_string(rnum));
+      }
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
     if (passedgCut) {
@@ -499,6 +517,19 @@ void hcal_elas_calib(char const *configfilename,
       isHCALedge = rowblkHCAL == 0 || rowblkHCAL == 23 || colblkHCAL == 0 || colblkHCAL == 11; 
       if (isHCALedge) continue;
 
+      // Applying dt cut
+      if (rnum<2660) {
+	dt_mean = dt_mean_1;
+	dt_sigma = dt_sigma_1;
+	dt_nsigma = dt_nsigma_1;
+      } else {
+	dt_mean = dt_mean_2;
+	dt_sigma = dt_sigma_2;
+	dt_nsigma = dt_nsigma_2;	
+      }
+      indtADC = abs(heep_dt_ADC-dt_mean)<dt_sigma*dt_nsigma;
+      if (!indtADC) continue;
+      
       // keeping count of events passing globcal cuts
       Ngoodevs++;
       
@@ -539,7 +570,11 @@ void hcal_elas_calib(char const *configfilename,
       T_yECAL_exp = (ECAL_intersect - ECAL_origin).Dot(ECAL_yaxis);
       T_dxECAL = xECAL - T_xECAL_exp;
       T_dyECAL = yECAL - T_yECAL_exp;    
+
+      T_rnum = rnum;
+      T_gevnum = gevnum;      
       
+      T_indtADC = indtADC;      
       T_isHCALedge = isHCALedge;
       T_isNearBadChan = isNearBadChan;
 
@@ -548,6 +583,7 @@ void hcal_elas_calib(char const *configfilename,
       T_heep_pp_pth = heep_pp_pth;
       T_heep_pp_eth = heep_pp_eth;
       T_heep_eth_pth = heep_eth_pth;
+      T_heep_dt_ADC = heep_dt_ADC;            
       T_heep_dpp = heep_dpp;
       T_heep_dxECAL = heep_dxECAL;
       T_heep_dyECAL = heep_dyECAL;      
@@ -766,6 +802,7 @@ void hcal_elas_calib(char const *configfilename,
   Double_t T_yHCAL_calib;  TBranch *T_yHCAL_c = Tout->Branch("yHCAL_calib", &T_yHCAL_calib, "yHCAL_calib/D");
   Double_t T_EovEexp_calib;   TBranch *T_EovEexp_c = Tout->Branch("EovEexp_calib", &T_EovEexp_calib, "EovEexp_calib/D");  
 
+  itrrun=0; runnum=0;     
   Nevents = C->GetEntries(), nevent=0;
   std::cout << "Looping over events again to check calibration.." << std::endl; 
   while(C->GetEntry(nevent++)) {
@@ -787,10 +824,10 @@ void hcal_elas_calib(char const *configfilename,
       treenum = currenttreenum;
       GlobalCut->UpdateFormulaLeaves();
 
-      // // track change of runnum
-      // if (nevent == 1 || rnum != runnum) {
-      // 	runnum = rnum; itrrun++;
-      // }
+      // track change of runnum
+      if (nevent == 1 || rnum != runnum) {
+	runnum = rnum; itrrun++;
+      }
     } 
     bool passedgCut = GlobalCut->EvalInstance(0) != 0;   
     if (passedgCut) {
@@ -799,6 +836,19 @@ void hcal_elas_calib(char const *configfilename,
       isHCALedge = rowblkHCAL == 0 || rowblkHCAL == 23 || colblkHCAL == 0 || colblkHCAL == 11; 
       if (isHCALedge) continue;
       
+      // Applying dt cut
+      if (rnum<2660) {
+	dt_mean = dt_mean_1;
+	dt_sigma = dt_sigma_1;
+	dt_nsigma = dt_nsigma_1;
+      } else {
+	dt_mean = dt_mean_2;
+	dt_sigma = dt_sigma_2;
+	dt_nsigma = dt_nsigma_2;	
+      }
+      indtADC = abs(heep_dt_ADC-dt_mean)<dt_sigma*dt_nsigma;
+      if (!indtADC) continue;      
+
       TVector3 vertex(0,0,trVz[0]);
       
       // scattered proton kinematics (reconstructed)
