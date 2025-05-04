@@ -290,6 +290,7 @@ void elas_calib(char const *configfilename,
   Double_t rowclblkECAL[maxNtr];   C->SetBranchAddress("earm.ecal.clus_blk.row", &rowclblkECAL);
   Double_t colclblkECAL[maxNtr];   C->SetBranchAddress("earm.ecal.clus_blk.col", &colclblkECAL);
   Double_t atimeclblkECAL[maxNtr]; C->SetBranchAddress("earm.ecal.clus_blk.atime", &atimeclblkECAL);
+  Double_t againclblkECAL[maxNtr]; C->SetBranchAddress("earm.ecal.clus_blk.again", &againclblkECAL);  
   Double_t againblkECAL;           C->SetBranchAddress("earm.ecal.againblk", &againblkECAL);  
   // sbs.hcal branches
   Double_t eHCAL;                C->SetBranchStatus("sbs.hcal.e",1); C->SetBranchAddress("sbs.hcal.e", &eHCAL);
@@ -684,7 +685,8 @@ void elas_calib(char const *configfilename,
 	  Double_t engFrac = eclblkECAL[blk]/eclblkECAL[0];
 	  if (fabs(cltdiff)<tmax_cut && engFrac>=engFrac_cut) {
 	    Double_t eclblkECAL_i = eclblkECAL[blk];
-	    A[blkID] += eclblkECAL_i;
+	    Double_t intclblkECAL_i = eclblkECAL_i/againclblkECAL[blk]; //pulse integral	    
+	    A[blkID] += intclblkECAL_i;
 	    eECALcl += eclblkECAL_i;
 	    // filling cluster level histos
 	    if (blk!=0) {
@@ -797,52 +799,52 @@ void elas_calib(char const *configfilename,
   ofstream outGain_data, outGainR_data;
   outGain_data.open(outGain);
   outGainR_data.open(outGainR);
-  Double_t newADCgratio[kNblks];
-  for (int i=0; i<kNblks; i++) { newADCgratio[i] = -1000; }  
+  Double_t newADCgain[kNblks];
+  for (int i=0; i<kNblks; i++) { newADCgain[i] = -1000; }  
   for (int irow=0; irow<kNrows; irow++) {
     int colMax = ncolprow[irow];
     for (int icol=0; icol<colMax; icol++) {      
-      Double_t oldCoeff = oldADCgain[iblk];
-      Double_t gainRatio = CoeffR(iblk);
+      Double_t oldGain = oldADCgain[iblk];
+      Double_t newGain = CoeffR(iblk);
       if(!badCells[iblk]) {
 	h_nevent_blk->Fill(iblk, nevents_per_blk[iblk]);
-	h_coeff_Ratio_blk->Fill(iblk, gainRatio);
-	h_coeff_blk->Fill(iblk, gainRatio*oldCoeff);
+	h_coeff_Ratio_blk->Fill(iblk, newGain);
+	h_coeff_blk->Fill(iblk, newGain);
 	if (irow<23) {
-	  h2_coeff_detView_bot->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_bot->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_bot->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_bot->Fill(icol, irow, oldGain);
 	} else if (irow<46) {
-	  h2_coeff_detView_mid->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_mid->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_mid->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_mid->Fill(icol, irow, oldGain);
 	} else {
-	  h2_coeff_detView_top->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_top->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_top->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_top->Fill(icol, irow, oldGain);
 	}
 
-	// std::cout << gainRatio << "  ";
-	outGain_data << gainRatio * oldCoeff << " ";
-	outGainR_data << gainRatio << " ";	
-	newADCgratio[iblk] = gainRatio;
+	// std::cout << newGain << "  ";
+	outGain_data << newGain << " ";
+	outGainR_data << newGain/oldGain << " ";	
+	newADCgain[iblk] = newGain;
       }else {
-	gainRatio = 1.; // (Important)
+	newGain = oldGain; // (Important)
 	h_nevent_blk->Fill(iblk,nevents_per_blk[iblk]);
-	h_coeff_Ratio_blk->Fill(iblk, gainRatio);
-	h_coeff_blk->Fill(iblk, gainRatio*oldCoeff);
+	h_coeff_Ratio_blk->Fill(iblk, newGain);
+	h_coeff_blk->Fill(iblk, newGain);
 	if (irow<23) {
-	  h2_coeff_detView_bot->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_bot->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_bot->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_bot->Fill(icol, irow, oldGain);
 	} else if (irow<46) {
-	  h2_coeff_detView_mid->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_mid->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_mid->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_mid->Fill(icol, irow, oldGain);
 	} else {
-	  h2_coeff_detView_top->Fill(icol, irow, gainRatio*oldCoeff);
-	  h2_coeff_detView_old_top->Fill(icol, irow, oldCoeff);
+	  h2_coeff_detView_top->Fill(icol, irow, newGain);
+	  h2_coeff_detView_old_top->Fill(icol, irow, oldGain);
 	}
 
-	// std::cout << gainRatio << "  ";
-	outGain_data << gainRatio * oldCoeff << " ";
-	outGainR_data << gainRatio << " ";	
-	newADCgratio[iblk] = gainRatio;
+	// std::cout << newGain << "  ";
+	outGain_data << newGain  << " ";
+	outGainR_data << newGain/oldGain << " ";	
+	newADCgain[iblk] = newGain;
       }
 
       iblk += 1;
@@ -957,8 +959,8 @@ void elas_calib(char const *configfilename,
 	xECALcl_calib = (xECALcl_calib*eECALcl_calib + xclblkECAL[blk]*eclblkECAL[blk]) / (eECALcl_calib+eclblkECAL[blk]);
 	yECALcl_calib = (yECALcl_calib*eECALcl_calib + yclblkECAL[blk]*eclblkECAL[blk]) / (eECALcl_calib+eclblkECAL[blk]);	
 
-	if (blk==0) eclblkECAL_calib_HE = eclblkECAL[blk] * newADCgratio[blkID];
-	Double_t eclblkECAL_calib = eclblkECAL[blk] * newADCgratio[blkID];	
+	if (blk==0) eclblkECAL_calib_HE = (eclblkECAL[blk]/againclblkECAL[blk]) * newADCgain[blkID];
+	Double_t eclblkECAL_calib = (eclblkECAL[blk]/againclblkECAL[blk]) * newADCgain[blkID];	
 	if (eclblkECAL[blk]>hit_threshold) {
 	  Double_t cltdiff = atimeclblkECAL[blk]-atimeclblkECAL[0];
 	  Double_t engFrac = eclblkECAL[blk]/eclblkECAL[0];
